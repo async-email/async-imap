@@ -1,7 +1,9 @@
 <!-- this file uses https://github.com/livioribeiro/cargo-readme -->
 <!-- do not manually edit README.md, instead edit README.tpl or src/lib.rs -->
 
-# imap
+# async-imap
+
+> WIP: async implementation of IMAP, based on [rust-imap](https://crates.io/crates/imap).
 
 [![Crates.io](https://img.shields.io/crates/v/imap.svg)](https://crates.io/crates/imap)
 [![Documentation](https://docs.rs/imap/badge.svg)](https://docs.rs/imap/)
