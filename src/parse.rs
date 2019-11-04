@@ -91,7 +91,7 @@ pub fn parse_names<'a, T: Stream<Item = ResponseData> + Unpin>(
                         delimiter: (*delimiter).map(Into::into),
                         name: (*name).into(),
                     })),
-                    _resp => match handle_unilateral(&resp, unsolicited.clone()).await {
+                    _resp => match handle_unilateral(&resp, unsolicited).await {
                         Some(resp) => match resp.parsed() {
                             Response::Fetch(..) => None,
                             resp => Some(Err((resp).into())),
