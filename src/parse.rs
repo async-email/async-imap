@@ -63,38 +63,45 @@ enum MapOrNot<'a, T> {
 //         .collect()
 // }
 
-pub(crate) fn parse_names<'a, T: Stream<Item = ResponseData> + Unpin>(
+pub fn parse_names<'a, T: Stream<Item = ResponseData> + Unpin>(
     stream: &'a mut T,
-    unsolicited: &'a mut sync::Sender<UnsolicitedResponse>,
-) -> impl Future<Output = Result<Vec<Name<'a>>>> + 'a {
-    stream
-        .take_while(|res| match res.parsed() {
-            Response::Done { .. } => false,
-            _ => true,
-        })
-        .filter_map(move |resp| match resp.parsed() {
-            // https://github.com/djc/imap-proto/issues/4
-            Response::MailboxData(MailboxDatum::List {
-                flags,
-                delimiter,
-                name,
-            }) => Some(Ok(Name {
-                attributes: flags
-                    .into_iter()
-                    .map(|s| NameAttribute::from((*s).to_string()))
-                    .collect(),
-                delimiter: (*delimiter).map(Into::into),
-                name: (*name).into(),
-            })),
-            _resp => match handle_unilateral(&resp, unsolicited) {
-                Some(resp) => match resp.parsed() {
-                    Response::Fetch(..) => None,
-                    resp => Some(Err((resp).into())),
-                },
-                None => None,
-            },
-        })
-        .collect()
+    unsolicited: sync::Sender<UnsolicitedResponse>,
+) -> impl Stream<Item = Result<Name<'a>>> + 'a {
+    use futures::StreamExt;
+
+    StreamExt::filter_map(
+        StreamExt::take_while(stream, |res| match res.parsed() {
+            Response::Done { .. } => futures::future::ready(false),
+            _ => futures::future::ready(true),
+        }),
+        move |resp| {
+            let unsolicited = unsolicited.clone();
+
+            async move {
+                match resp.parsed() {
+                    Response::MailboxData(MailboxDatum::List {
+                        flags,
+                        delimiter,
+                        name,
+                    }) => Some(Ok(Name {
+                        attributes: flags
+                            .into_iter()
+                            .map(|s| NameAttribute::from((*s).to_string()))
+                            .collect(),
+                        delimiter: (*delimiter).map(Into::into),
+                        name: (*name).into(),
+                    })),
+                    _resp => match handle_unilateral(&resp, unsolicited.clone()).await {
+                        Some(resp) => match resp.parsed() {
+                            Response::Fetch(..) => None,
+                            resp => Some(Err((resp).into())),
+                        },
+                        None => None,
+                    },
+                }
+            }
+        },
+    )
 }
 
 pub fn parse_fetches<T: Stream<Item = ResponseData> + Unpin>(
@@ -307,26 +314,28 @@ pub fn parse_ids<T: Stream<Item = ResponseData> + Unpin>(
 
 // check if this is simply a unilateral server response
 // (see Section 7 of RFC 3501):
-fn handle_unilateral<'a>(
+async fn handle_unilateral<'a>(
     res: &'a ResponseData,
-    unsolicited: &mut sync::Sender<UnsolicitedResponse>,
+    unsolicited: sync::Sender<UnsolicitedResponse>,
 ) -> Option<&'a ResponseData> {
     // FIXME: return the future from sending to the channel
     match res.parsed() {
         Response::MailboxData(MailboxDatum::Status { mailbox, status }) => {
-            unsolicited.send(UnsolicitedResponse::Status {
-                mailbox: (*mailbox).into(),
-                attributes: Vec::new(), // status, FIXME
-            });
+            unsolicited
+                .send(UnsolicitedResponse::Status {
+                    mailbox: (*mailbox).into(),
+                    attributes: Vec::new(), // status, FIXME
+                })
+                .await;
         }
         Response::MailboxData(MailboxDatum::Recent(n)) => {
-            unsolicited.send(UnsolicitedResponse::Recent(*n));
+            unsolicited.send(UnsolicitedResponse::Recent(*n)).await;
         }
         Response::MailboxData(MailboxDatum::Exists(n)) => {
-            unsolicited.send(UnsolicitedResponse::Exists(*n));
+            unsolicited.send(UnsolicitedResponse::Exists(*n)).await;
         }
         Response::Expunge(n) => {
-            unsolicited.send(UnsolicitedResponse::Expunge(*n));
+            unsolicited.send(UnsolicitedResponse::Expunge(*n)).await;
         }
         _res => {
             return Some(res);

@@ -9,6 +9,7 @@ use async_std::prelude::*;
 use async_std::sync;
 use async_tls::{client::TlsStream, TlsConnector};
 use futures::SinkExt;
+use futures::TryFutureExt;
 use futures_codec::Framed;
 use imap_proto::Response;
 
@@ -171,7 +172,7 @@ impl Client<ConnStream<Framed<TcpStream, ImapCodec>>> {
         let ssl_stream = ssl_connector
             .connect(domain.as_ref(), self.conn.stream.into_inner().release().0)?
             .await?;
-        let mut stream = Framed::new(ssl_stream, ImapCodec::default());
+        let stream = Framed::new(ssl_stream, ImapCodec::default());
         let conn_stream = ConnStream::new(stream);
 
         let client = Client::new(conn_stream);
@@ -922,15 +923,18 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
         &mut self,
         reference_name: Option<&str>,
         mailbox_pattern: Option<&str>,
-    ) -> Result<Vec<Name<'_>>> {
+    ) -> Result<impl Stream<Item = Result<Name<'_>>>> {
         self.run_command(&format!(
             "LIST {} {}",
             quote!(reference_name.unwrap_or("")),
             mailbox_pattern.unwrap_or("\"\"")
         ))
         .await?;
-        let names = parse_names(&mut self.conn.stream, &mut self.unsolicited_responses_tx).await?;
-        Ok(names)
+
+        Ok(parse_names(
+            &mut self.conn.stream,
+            self.unsolicited_responses_tx.clone(),
+        ))
     }
 
     /// The [`LSUB` command](https://tools.ietf.org/html/rfc3501#section-6.3.9) returns a subset of
@@ -952,14 +956,14 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
         &mut self,
         reference_name: Option<&str>,
         mailbox_pattern: Option<&str>,
-    ) -> Result<Vec<Name<'_>>> {
+    ) -> Result<impl Stream<Item = Result<Name<'_>>>> {
         self.run_command(&format!(
             "LSUB {} {}",
             quote!(reference_name.unwrap_or("")),
             mailbox_pattern.unwrap_or("")
         ))
         .await?;
-        let names = parse_names(&mut self.conn.stream, &mut self.unsolicited_responses_tx).await?;
+        let names = parse_names(&mut self.conn.stream, self.unsolicited_responses_tx.clone());
 
         Ok(names)
     }
