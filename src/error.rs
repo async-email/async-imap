@@ -9,10 +9,7 @@ use std::result;
 use std::str::Utf8Error;
 
 use base64::DecodeError;
-use bufstream::IntoInnerError as BufError;
 use imap_proto::Response;
-use native_tls::Error as TlsError;
-use native_tls::HandshakeError as TlsHandshakeError;
 
 /// A convenience wrapper around `Result` for `imap::Error`.
 pub type Result<T> = result::Result<T, Error>;
@@ -24,8 +21,6 @@ pub enum Error {
     Io(IoError),
     /// An error from the `async_tls` library during the TLS handshake.
     TlsHandshake(std::io::Error),
-    /// An error from the `native_tls` library while managing the socket.
-    Tls(TlsError),
     /// A BAD response from the IMAP server.
     Bad(String),
     /// A NO response from the IMAP server.
@@ -55,18 +50,6 @@ impl From<ParseError> for Error {
     }
 }
 
-impl<T> From<BufError<T>> for Error {
-    fn from(err: BufError<T>) -> Error {
-        Error::Io(err.into())
-    }
-}
-
-impl From<TlsError> for Error {
-    fn from(err: TlsError) -> Error {
-        Error::Tls(err)
-    }
-}
-
 impl<'a> From<&'a Response<'a>> for Error {
     fn from(err: &'a Response<'a>) -> Error {
         Error::Parse(ParseError::Unexpected(format!("{:?}", err)))
@@ -77,7 +60,6 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             Error::Io(ref e) => fmt::Display::fmt(e, f),
-            Error::Tls(ref e) => fmt::Display::fmt(e, f),
             Error::TlsHandshake(ref e) => fmt::Display::fmt(e, f),
             Error::Validate(ref e) => fmt::Display::fmt(e, f),
             Error::No(ref data) | Error::Bad(ref data) => {
@@ -92,7 +74,6 @@ impl StdError for Error {
     fn description(&self) -> &str {
         match *self {
             Error::Io(ref e) => e.description(),
-            Error::Tls(ref e) => e.description(),
             Error::TlsHandshake(ref e) => e.description(),
             Error::Parse(ref e) => e.description(),
             Error::Validate(ref e) => e.description(),
@@ -107,7 +88,6 @@ impl StdError for Error {
     fn cause(&self) -> Option<&dyn StdError> {
         match *self {
             Error::Io(ref e) => Some(e),
-            Error::Tls(ref e) => Some(e),
             Error::TlsHandshake(ref e) => Some(e),
             Error::Parse(ParseError::DataNotUtf8(_, ref e)) => Some(e),
             _ => None,

@@ -152,14 +152,7 @@ pub async fn parse_capabilities<'a, T: Stream<Item = ResponseData> + Unpin>(
 ) -> Capabilities {
     let mut caps: HashSet<Capability> = HashSet::new();
 
-    while let Some(res) = stream
-        .take_while(|res| match res.parsed() {
-            Response::Done { .. } => false,
-            _ => true,
-        })
-        .next()
-        .await
-    {
+    while let Some(res) = stream.next().await {
         match res.parsed() {
             Response::Capabilities(cs) => {
                 for c in cs {
@@ -345,13 +338,12 @@ fn handle_unilateral<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_std::sync::{Arc, Mutex};
 
-    fn input_stream(data: &str) -> Arc<Mutex<Vec<ResponseData>>> {
-        Arc::new(Mutex::new(
-            data.lines()
-                .rev()
-                .map(|line| match imap_proto::parse_response(line.as_bytes()) {
+    fn input_stream(data: &[&str]) -> Vec<ResponseData> {
+        data.iter()
+            .map(|line| {
+                println!("parsing {:?}", line);
+                match imap_proto::parse_response(line.as_bytes()) {
                     Ok((remaining, response)) => {
                         let response = unsafe { std::mem::transmute(response) };
                         assert_eq!(remaining.len(), 0);
@@ -361,35 +353,32 @@ mod tests {
                             response,
                         }
                     }
-                    Err(_) => panic!("invalid input"),
-                })
-                .collect(),
-        ))
+                    Err(err) => panic!("invalid input: {:?}", err),
+                }
+            })
+            .collect()
     }
 
-    // #[test]
-    // fn parse_capability_test() {
-    //     async_std::task::block_on(async move {
-    //         let expected_capabilities =
-    //             vec!["IMAP4rev1", "STARTTLS", "AUTH=GSSAPI", "LOGINDISABLED"];
-    //         let responses =
-    //             input_stream("* CAPABILITY IMAP4rev1 STARTTLS AUTH=GSSAPI LOGINDISABLED\r\n");
+    #[test]
+    fn parse_capability_test() {
+        async_std::task::block_on(async move {
+            let expected_capabilities =
+                vec!["IMAP4rev1", "STARTTLS", "AUTH=GSSAPI", "LOGINDISABLED"];
+            let responses = input_stream(&vec![
+                "* CAPABILITY IMAP4rev1 STARTTLS AUTH=GSSAPI LOGINDISABLED\r\n",
+            ]);
 
-    //         let mut stream = async_std::stream::from_fn(|| {
-    //             let responses = Arc::clone(&responses);
-    //             async move { responses.lock().await.pop() }
-    //         });
-
-    //         let (mut send, recv) = sync::channel(10);
-    //         let capabilities = parse_capabilities(&mut stream, &mut send).await;
-    //         // shouldn't be any unexpected responses parsed
-    //         assert!(recv.is_empty());
-    //         assert_eq!(capabilities.len(), 4);
-    //         for e in expected_capabilities {
-    //             assert!(capabilities.has_str(e));
-    //         }
-    //     });
-    // }
+            let mut stream = async_std::stream::from_iter(responses);
+            let (mut send, recv) = sync::channel(10);
+            let capabilities = parse_capabilities(&mut stream, &mut send).await;
+            // shouldn't be any unexpected responses parsed
+            assert!(recv.is_empty());
+            assert_eq!(capabilities.len(), 4);
+            for e in expected_capabilities {
+                assert!(capabilities.has_str(e));
+            }
+        });
+    }
 
     // #[test]
     // fn parse_capability_case_insensitive_test() {
