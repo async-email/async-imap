@@ -380,29 +380,40 @@ mod tests {
         });
     }
 
-    // #[test]
-    // fn parse_capability_case_insensitive_test() {
-    //     // Test that "IMAP4REV1" (instead of "IMAP4rev1") is accepted
-    //     let expected_capabilities = vec!["IMAP4rev1", "STARTTLS"];
-    //     let lines = b"* CAPABILITY IMAP4REV1 STARTTLS\r\n";
-    //     let (mut send, recv) = sync::channel();
-    //     let capabilities = parse_capabilities(lines.to_vec(), &mut send).unwrap();
-    //     // shouldn't be any unexpected responses parsed
-    //     assert!(recv.try_recv().is_err());
-    //     assert_eq!(capabilities.len(), 2);
-    //     for e in expected_capabilities {
-    //         assert!(capabilities.has_str(e));
-    //     }
-    // }
+    #[test]
+    fn parse_capability_case_insensitive_test() {
+        async_std::task::block_on(async move {
+            // Test that "IMAP4REV1" (instead of "IMAP4rev1") is accepted
+            let expected_capabilities = vec!["IMAP4rev1", "STARTTLS"];
+            let responses = input_stream(&vec!["* CAPABILITY IMAP4REV1 STARTTLS\r\n"]);
+            let mut stream = async_std::stream::from_iter(responses);
 
-    // #[test]
-    // #[should_panic]
-    // fn parse_capability_invalid_test() {
-    //     let (mut send, recv) = sync::channel();
-    //     let lines = b"* JUNK IMAP4rev1 STARTTLS AUTH=GSSAPI LOGINDISABLED\r\n";
-    //     parse_capabilities(lines.to_vec(), &mut send).unwrap();
-    //     assert!(recv.try_recv().is_err());
-    // }
+            let (mut send, recv) = sync::channel(10);
+            let capabilities = parse_capabilities(&mut stream, &mut send).await;
+
+            // shouldn't be any unexpected responses parsed
+            assert!(recv.is_empty());
+            assert_eq!(capabilities.len(), 2);
+            for e in expected_capabilities {
+                assert!(capabilities.has_str(e));
+            }
+        });
+    }
+
+    #[test]
+    #[should_panic]
+    fn parse_capability_invalid_test() {
+        async_std::task::block_on(async move {
+            let (mut send, recv) = sync::channel(10);
+            let responses = input_stream(&vec![
+                "* JUNK IMAP4rev1 STARTTLS AUTH=GSSAPI LOGINDISABLED\r\n",
+            ]);
+            let mut stream = async_std::stream::from_iter(responses);
+
+            parse_capabilities(&mut stream, &mut send).await;
+            assert!(recv.is_empty());
+        });
+    }
 
     // #[test]
     // fn parse_names_test() {
