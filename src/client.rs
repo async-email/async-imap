@@ -1,21 +1,18 @@
-use base64;
 use std::collections::HashSet;
 use std::ops::{Deref, DerefMut};
 use std::str;
 
-use async_std::io::{self, Read, Write};
+use async_std::io;
 use async_std::net::{TcpStream, ToSocketAddrs};
 use async_std::prelude::*;
 use async_std::sync;
 use async_tls::{client::TlsStream, TlsConnector};
 use futures::SinkExt;
-use futures::TryFutureExt;
 use futures_codec::Framed;
 use imap_proto::Response;
 
 use super::authenticator::Authenticator;
-use super::error::{Error, ParseError, Result, ValidateError};
-use super::extensions;
+use super::error::{Error, Result, ValidateError};
 use super::parse::*;
 use super::types::*;
 use crate::codec::{ConnStream, IdGenerator, ImapCodec, Request, ResponseData};
@@ -403,7 +400,7 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
         // TODO: also note READ/WRITE vs READ-only mode!
         self.run_command(&format!("SELECT {}", validate_str(mailbox_name.as_ref())?))
             .await?;
-        parse_mailbox(&mut self.conn.stream, &mut self.unsolicited_responses_tx)
+        parse_mailbox(&mut self.conn.stream, self.unsolicited_responses_tx.clone())
     }
 
     /// The `EXAMINE` command is identical to [`Session::select`] and returns the same output;
@@ -413,7 +410,7 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
     pub async fn examine<S: AsRef<str>>(&mut self, mailbox_name: S) -> Result<Mailbox> {
         self.run_command(&format!("EXAMINE {}", validate_str(mailbox_name.as_ref())?))
             .await?;
-        parse_mailbox(&mut self.conn.stream, &mut self.unsolicited_responses_tx)
+        parse_mailbox(&mut self.conn.stream, self.unsolicited_responses_tx.clone())
     }
 
     /// Fetch retreives data associated with a set of messages in the mailbox.
@@ -474,7 +471,11 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
     ///  - `RFC822.HEADER`: Functionally equivalent to `BODY.PEEK[HEADER]`.
     ///  - `RFC822.SIZE`: The [RFC-2822](https://tools.ietf.org/html/rfc2822) size of the message.
     ///  - `UID`: The unique identifier for the message.
-    pub async fn fetch<S1, S2>(&mut self, sequence_set: S1, query: S2) -> ZeroCopyResult<Vec<Fetch>>
+    pub async fn fetch<S1, S2>(
+        &mut self,
+        sequence_set: S1,
+        query: S2,
+    ) -> Result<impl Stream<Item = Result<Fetch<'_>>>>
     where
         S1: AsRef<str>,
         S2: AsRef<str>,
@@ -485,12 +486,18 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
             query.as_ref()
         ))
         .await?;
-        parse_fetches(&mut self.conn.stream, &mut self.unsolicited_responses_tx)
+        let res = parse_fetches(&mut self.conn.stream, self.unsolicited_responses_tx.clone());
+
+        Ok(res)
     }
 
     /// Equivalent to [`Session::fetch`], except that all identifiers in `uid_set` are
     /// [`Uid`]s. See also the [`UID` command](https://tools.ietf.org/html/rfc3501#section-6.4.8).
-    pub async fn uid_fetch<S1, S2>(&mut self, uid_set: S1, query: S2) -> ZeroCopyResult<Vec<Fetch>>
+    pub async fn uid_fetch<S1, S2>(
+        &mut self,
+        uid_set: S1,
+        query: S2,
+    ) -> Result<impl Stream<Item = Result<Fetch<'_>>>>
     where
         S1: AsRef<str>,
         S2: AsRef<str>,
@@ -501,13 +508,14 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
             query.as_ref()
         ))
         .await?;
-        parse_fetches(&mut self.conn.stream, &mut self.unsolicited_responses_tx)
+        let res = parse_fetches(&mut self.conn.stream, self.unsolicited_responses_tx.clone());
+        Ok(res)
     }
 
     /// Noop always succeeds, and it does nothing.
     pub async fn noop(&mut self) -> Result<()> {
         self.run_command("NOOP").await?;
-        parse_noop(&mut self.conn.stream, &mut self.unsolicited_responses_tx)
+        parse_noop(&mut self.conn.stream, self.unsolicited_responses_tx.clone())
     }
 
     /// Logout informs the server that the client is done with the connection.
@@ -636,7 +644,8 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
     /// one of the listed capabilities. See [`Capabilities`] for further details.
     pub async fn capabilities(&mut self) -> Result<Capabilities> {
         self.run_command("CAPABILITY").await?;
-        let c = parse_capabilities(&mut self.conn.stream, &mut self.unsolicited_responses_tx).await;
+        let c = parse_capabilities(&mut self.conn.stream, self.unsolicited_responses_tx.clone())
+            .await?;
         Ok(c)
     }
 
@@ -645,7 +654,7 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
     /// The message sequence number of each message that is removed is returned.
     pub async fn expunge(&mut self) -> Result<Vec<Seq>> {
         self.run_command("EXPUNGE").await?;
-        parse_expunge(&mut self.conn.stream, &mut self.unsolicited_responses_tx)
+        parse_expunge(&mut self.conn.stream, self.unsolicited_responses_tx.clone())
     }
 
     /// The [`UID EXPUNGE` command](https://tools.ietf.org/html/rfc4315#section-2.1) permanently
@@ -673,7 +682,7 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
     pub async fn uid_expunge<S: AsRef<str>>(&mut self, uid_set: S) -> Result<Vec<Uid>> {
         self.run_command(&format!("UID EXPUNGE {}", uid_set.as_ref()))
             .await?;
-        parse_expunge(&mut self.conn.stream, &mut self.unsolicited_responses_tx)
+        parse_expunge(&mut self.conn.stream, self.unsolicited_responses_tx.clone())
     }
 
     /// The [`CHECK` command](https://tools.ietf.org/html/rfc3501#section-6.4.1) requests a
@@ -755,7 +764,11 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
     ///     Ok(())
     /// }
     /// ```
-    pub async fn store<S1, S2>(&mut self, sequence_set: S1, query: S2) -> ZeroCopyResult<Vec<Fetch>>
+    pub async fn store<S1, S2>(
+        &mut self,
+        sequence_set: S1,
+        query: S2,
+    ) -> Result<impl Stream<Item = Result<Fetch<'_>>>>
     where
         S1: AsRef<str>,
         S2: AsRef<str>,
@@ -766,12 +779,17 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
             query.as_ref()
         ))
         .await?;
-        parse_fetches(&mut self.conn.stream, &mut self.unsolicited_responses_tx)
+        let res = parse_fetches(&mut self.conn.stream, self.unsolicited_responses_tx.clone());
+        Ok(res)
     }
 
     /// Equivalent to [`Session::store`], except that all identifiers in `sequence_set` are
     /// [`Uid`]s. See also the [`UID` command](https://tools.ietf.org/html/rfc3501#section-6.4.8).
-    pub async fn uid_store<S1, S2>(&mut self, uid_set: S1, query: S2) -> ZeroCopyResult<Vec<Fetch>>
+    pub async fn uid_store<S1, S2>(
+        &mut self,
+        uid_set: S1,
+        query: S2,
+    ) -> Result<impl Stream<Item = Result<Fetch<'_>>>>
     where
         S1: AsRef<str>,
         S2: AsRef<str>,
@@ -782,7 +800,8 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
             query.as_ref()
         ))
         .await?;
-        parse_fetches(&mut self.conn.stream, &mut self.unsolicited_responses_tx)
+        let res = parse_fetches(&mut self.conn.stream, self.unsolicited_responses_tx.clone());
+        Ok(res)
     }
 
     /// The [`COPY` command](https://tools.ietf.org/html/rfc3501#section-6.4.7) copies the
@@ -1013,7 +1032,7 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
             data_items.as_ref()
         ))
         .await?;
-        parse_mailbox(&mut self.conn.stream, &mut self.unsolicited_responses_tx)
+        parse_mailbox(&mut self.conn.stream, self.unsolicited_responses_tx.clone())
     }
 
     /// This method returns a handle that lets you use the [`IDLE`
@@ -1132,7 +1151,7 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
     pub async fn search<S: AsRef<str>>(&mut self, query: S) -> Result<HashSet<Seq>> {
         self.run_command(&format!("SEARCH {}", query.as_ref()))
             .await?;
-        parse_ids(&mut self.conn.stream, &mut self.unsolicited_responses_tx)
+        parse_ids(&mut self.conn.stream, self.unsolicited_responses_tx.clone())
     }
 
     /// Equivalent to [`Session::search`], except that the returned identifiers
@@ -1141,7 +1160,7 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
     pub async fn uid_search<S: AsRef<str>>(&mut self, query: S) -> Result<HashSet<Uid>> {
         self.run_command(&format!("UID SEARCH {}", query.as_ref()))
             .await?;
-        parse_ids(&mut self.conn.stream, &mut self.unsolicited_responses_tx)
+        parse_ids(&mut self.conn.stream, self.unsolicited_responses_tx.clone())
     }
 
     // these are only here because they are public interface, the rest is in `Connection`

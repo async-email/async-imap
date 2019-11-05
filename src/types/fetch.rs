@@ -11,7 +11,7 @@ const DATE_TIME_FORMAT: &str = "%d-%b-%Y %H:%M:%S %z";
 /// data about a particular message. This response occurs as the result of a `FETCH` or `STORE`
 /// command, as well as by unilateral server decision (e.g., flag updates).
 #[derive(Debug, Eq, PartialEq)]
-pub struct Fetch {
+pub struct Fetch<'a> {
     /// The ordinal number of this message in its containing mailbox.
     pub message: Seq,
 
@@ -27,11 +27,11 @@ pub struct Fetch {
     // Note that none of these fields are *actually* 'static. Rather, they are tied to the lifetime
     // of the `ZeroCopy` that contains this `Name`. That's also why they can't be public -- we can
     // only return them with a lifetime tied to self.
-    pub(crate) fetch: Vec<AttributeValue<'static>>,
-    pub(crate) flags: Vec<Flag<'static>>,
+    pub(crate) fetch: Vec<AttributeValue<'a>>,
+    pub(crate) flags: Vec<Flag<'a>>,
 }
 
-impl Fetch {
+impl<'a> Fetch<'a> {
     /// A list of flags that are set for this message.
     pub fn flags(&self) -> &[Flag<'_>] {
         &self.flags[..]
@@ -150,7 +150,7 @@ impl Fetch {
     ///
     /// See [section 2.3.6 of RFC 3501](https://tools.ietf.org/html/rfc3501#section-2.3.6) for
     /// details.
-    pub fn bodystructure<'a>(&self) -> Option<&BodyStructure<'a>> {
+    pub fn bodystructure(&self) -> Option<&BodyStructure<'a>> {
         self.fetch
             .iter()
             .filter_map(|av| match av {

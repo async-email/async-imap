@@ -6,7 +6,6 @@ use std::collections::HashSet;
 use async_std::prelude::*;
 use async_std::stream::Stream;
 use async_std::sync;
-use std::future::Future;
 
 use super::error::{Error, ParseError, Result};
 use super::types::*;
@@ -94,7 +93,7 @@ pub fn parse_names<'a, T: Stream<Item = ResponseData> + Unpin>(
                     _resp => match handle_unilateral(&resp, unsolicited).await {
                         Some(resp) => match resp.parsed() {
                             Response::Fetch(..) => None,
-                            resp => Some(Err((resp).into())),
+                            resp => Some(Err(resp.into())),
                         },
                         None => None,
                     },
@@ -104,45 +103,61 @@ pub fn parse_names<'a, T: Stream<Item = ResponseData> + Unpin>(
     )
 }
 
-pub fn parse_fetches<T: Stream<Item = ResponseData> + Unpin>(
-    lines: &mut T,
-    unsolicited: &mut sync::Sender<UnsolicitedResponse>,
-) -> ZeroCopyResult<Vec<Fetch>> {
-    unimplemented!()
-    // let f = |resp| match resp {
-    //     Response::Fetch(num, attrs) => {
-    //         let mut fetch = Fetch {
-    //             message: num,
-    //             flags: vec![],
-    //             uid: None,
-    //             size: None,
-    //             fetch: attrs,
-    //         };
+pub fn parse_fetches<'a, T: Stream<Item = ResponseData> + Unpin>(
+    stream: &'a mut T,
+    unsolicited: sync::Sender<UnsolicitedResponse>,
+) -> impl Stream<Item = Result<Fetch<'a>>> + 'a {
+    use futures::StreamExt;
 
-    //         // set some common fields eaglery
-    //         for attr in &fetch.fetch {
-    //             use imap_proto::AttributeValue;
-    //             match attr {
-    //                 AttributeValue::Flags(flags) => {
-    //                     fetch.flags.extend(flags.iter().cloned().map(Flag::from));
-    //                 }
-    //                 AttributeValue::Uid(uid) => fetch.uid = Some(*uid),
-    //                 AttributeValue::Rfc822Size(sz) => fetch.size = Some(*sz),
-    //                 _ => {}
-    //             }
-    //         }
+    StreamExt::filter_map(
+        StreamExt::take_while(stream, |res| match res.parsed() {
+            Response::Done { .. } => futures::future::ready(false),
+            _ => futures::future::ready(true),
+        }),
+        move |resp| {
+            let unsolicited = unsolicited.clone();
 
-    //         Ok(MapOrNot::Map(fetch))
-    //     }
-    //     resp => Ok(MapOrNot::Not(resp)),
-    // };
+            async move {
+                match resp.parsed() {
+                    Response::Fetch(num, attrs) => {
+                        let mut fetch = Fetch {
+                            message: *num,
+                            flags: vec![],
+                            uid: None,
+                            size: None,
+                            fetch: Vec::new(), // FIXME: attrs.to_vec(),
+                        };
 
-    // parse_many(lines, f, unsolicited)
+                        // set some common fields eaglery
+                        for attr in &fetch.fetch {
+                            use imap_proto::AttributeValue;
+                            match attr {
+                                AttributeValue::Flags(flags) => {
+                                    fetch.flags.extend(flags.iter().cloned().map(Flag::from));
+                                }
+                                AttributeValue::Uid(uid) => fetch.uid = Some(*uid),
+                                AttributeValue::Rfc822Size(sz) => fetch.size = Some(*sz),
+                                _ => {}
+                            }
+                        }
+                        Some(Ok(fetch))
+                    }
+                    _ => match handle_unilateral(&resp, unsolicited).await {
+                        Some(resp) => match resp.parsed() {
+                            Response::Fetch(..) => None,
+                            resp => Some(Err(resp.into())),
+                        },
+                        None => None,
+                    },
+                }
+            }
+        },
+    )
 }
 
 pub fn parse_expunge<T: Stream<Item = ResponseData> + Unpin>(
     lines: &mut T,
-    unsolicited: &mut sync::Sender<UnsolicitedResponse>,
+    unsolicited: sync::Sender<UnsolicitedResponse>,
 ) -> Result<Vec<u32>> {
     unimplemented!()
     // let f = |resp| match resp {
@@ -155,29 +170,31 @@ pub fn parse_expunge<T: Stream<Item = ResponseData> + Unpin>(
 
 pub async fn parse_capabilities<'a, T: Stream<Item = ResponseData> + Unpin>(
     stream: &'a mut T,
-    unsolicited: &'a mut sync::Sender<UnsolicitedResponse>,
-) -> Capabilities {
+    unsolicited: sync::Sender<UnsolicitedResponse>,
+) -> Result<Capabilities> {
     let mut caps: HashSet<Capability> = HashSet::new();
 
-    while let Some(res) = stream.next().await {
-        match res.parsed() {
+    while let Some(resp) = stream.next().await {
+        match resp.parsed() {
             Response::Capabilities(cs) => {
                 for c in cs {
                     caps.insert(Capability::from(c)); // TODO: avoid clone
                 }
             }
             _v => {
-                // unsolicited_responses.try_send(v.unwrap()).unwrap();
+                if let Some(resp) = handle_unilateral(&resp, unsolicited.clone()).await {
+                    return Err(resp.parsed().into());
+                }
             }
         }
     }
 
-    Capabilities(caps)
+    Ok(Capabilities(caps))
 }
 
 pub fn parse_noop<T: Stream<Item = ResponseData> + Unpin>(
     lines: &mut T,
-    unsolicited: &mut sync::Sender<UnsolicitedResponse>,
+    unsolicited: sync::Sender<UnsolicitedResponse>,
 ) -> Result<()> {
     unimplemented!()
     // let mut lines: &[u8] = &lines;
@@ -203,7 +220,7 @@ pub fn parse_noop<T: Stream<Item = ResponseData> + Unpin>(
 
 pub fn parse_mailbox<T: Stream<Item = ResponseData> + Unpin>(
     lines: &mut T,
-    unsolicited: &mut sync::Sender<UnsolicitedResponse>,
+    unsolicited: sync::Sender<UnsolicitedResponse>,
 ) -> Result<Mailbox> {
     unimplemented!()
     // let mut mailbox = Mailbox::default();
@@ -284,7 +301,7 @@ pub fn parse_mailbox<T: Stream<Item = ResponseData> + Unpin>(
 
 pub fn parse_ids<T: Stream<Item = ResponseData> + Unpin>(
     lines: &mut T,
-    unsolicited: &mut sync::Sender<UnsolicitedResponse>,
+    unsolicited: sync::Sender<UnsolicitedResponse>,
 ) -> Result<HashSet<u32>> {
     unimplemented!()
     // let mut lines = &lines[..];
@@ -318,7 +335,6 @@ async fn handle_unilateral<'a>(
     res: &'a ResponseData,
     unsolicited: sync::Sender<UnsolicitedResponse>,
 ) -> Option<&'a ResponseData> {
-    // FIXME: return the future from sending to the channel
     match res.parsed() {
         Response::MailboxData(MailboxDatum::Status { mailbox, status }) => {
             unsolicited
@@ -379,7 +395,7 @@ mod tests {
 
             let mut stream = async_std::stream::from_iter(responses);
             let (mut send, recv) = sync::channel(10);
-            let capabilities = parse_capabilities(&mut stream, &mut send).await;
+            let capabilities = parse_capabilities(&mut stream, send).await.unwrap();
             // shouldn't be any unexpected responses parsed
             assert!(recv.is_empty());
             assert_eq!(capabilities.len(), 4);
@@ -398,7 +414,7 @@ mod tests {
             let mut stream = async_std::stream::from_iter(responses);
 
             let (mut send, recv) = sync::channel(10);
-            let capabilities = parse_capabilities(&mut stream, &mut send).await;
+            let capabilities = parse_capabilities(&mut stream, send).await.unwrap();
 
             // shouldn't be any unexpected responses parsed
             assert!(recv.is_empty());
@@ -419,7 +435,7 @@ mod tests {
             ]);
             let mut stream = async_std::stream::from_iter(responses);
 
-            parse_capabilities(&mut stream, &mut send).await;
+            parse_capabilities(&mut stream, send.clone()).await;
             assert!(recv.is_empty());
         });
     }
