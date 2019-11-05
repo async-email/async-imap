@@ -400,7 +400,10 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
         // TODO: also note READ/WRITE vs READ-only mode!
         self.run_command(&format!("SELECT {}", validate_str(mailbox_name.as_ref())?))
             .await?;
-        parse_mailbox(&mut self.conn.stream, self.unsolicited_responses_tx.clone())
+        let mbox =
+            parse_mailbox(&mut self.conn.stream, self.unsolicited_responses_tx.clone()).await?;
+
+        Ok(mbox)
     }
 
     /// The `EXAMINE` command is identical to [`Session::select`] and returns the same output;
@@ -410,7 +413,10 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
     pub async fn examine<S: AsRef<str>>(&mut self, mailbox_name: S) -> Result<Mailbox> {
         self.run_command(&format!("EXAMINE {}", validate_str(mailbox_name.as_ref())?))
             .await?;
-        parse_mailbox(&mut self.conn.stream, self.unsolicited_responses_tx.clone())
+        let mbox =
+            parse_mailbox(&mut self.conn.stream, self.unsolicited_responses_tx.clone()).await?;
+
+        Ok(mbox)
     }
 
     /// Fetch retreives data associated with a set of messages in the mailbox.
@@ -515,7 +521,8 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
     /// Noop always succeeds, and it does nothing.
     pub async fn noop(&mut self) -> Result<()> {
         self.run_command("NOOP").await?;
-        parse_noop(&mut self.conn.stream, self.unsolicited_responses_tx.clone())
+        parse_noop(&mut self.conn.stream, self.unsolicited_responses_tx.clone()).await?;
+        Ok(())
     }
 
     /// Logout informs the server that the client is done with the connection.
@@ -652,9 +659,10 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
     /// The [`EXPUNGE` command](https://tools.ietf.org/html/rfc3501#section-6.4.3) permanently
     /// removes all messages that have [`Flag::Deleted`] set from the currently selected mailbox.
     /// The message sequence number of each message that is removed is returned.
-    pub async fn expunge(&mut self) -> Result<Vec<Seq>> {
+    pub async fn expunge<'a>(&'a mut self) -> Result<impl Stream<Item = Result<Seq>> + 'a> {
         self.run_command("EXPUNGE").await?;
-        parse_expunge(&mut self.conn.stream, self.unsolicited_responses_tx.clone())
+        let res = parse_expunge(&mut self.conn.stream, self.unsolicited_responses_tx.clone());
+        Ok(res)
     }
 
     /// The [`UID EXPUNGE` command](https://tools.ietf.org/html/rfc4315#section-2.1) permanently
@@ -679,10 +687,14 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
     ///
     /// Alternatively, the client may fall back to using just [`Session::expunge`], risking the
     /// unintended removal of some messages.
-    pub async fn uid_expunge<S: AsRef<str>>(&mut self, uid_set: S) -> Result<Vec<Uid>> {
+    pub async fn uid_expunge<'a, S: AsRef<str>>(
+        &'a mut self,
+        uid_set: S,
+    ) -> Result<impl Stream<Item = Result<Uid>> + 'a> {
         self.run_command(&format!("UID EXPUNGE {}", uid_set.as_ref()))
             .await?;
-        parse_expunge(&mut self.conn.stream, self.unsolicited_responses_tx.clone())
+        let res = parse_expunge(&mut self.conn.stream, self.unsolicited_responses_tx.clone());
+        Ok(res)
     }
 
     /// The [`CHECK` command](https://tools.ietf.org/html/rfc3501#section-6.4.1) requests a
@@ -1032,7 +1044,9 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
             data_items.as_ref()
         ))
         .await?;
-        parse_mailbox(&mut self.conn.stream, self.unsolicited_responses_tx.clone())
+        let mbox =
+            parse_mailbox(&mut self.conn.stream, self.unsolicited_responses_tx.clone()).await?;
+        Ok(mbox)
     }
 
     /// This method returns a handle that lets you use the [`IDLE`
@@ -1151,7 +1165,9 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
     pub async fn search<S: AsRef<str>>(&mut self, query: S) -> Result<HashSet<Seq>> {
         self.run_command(&format!("SEARCH {}", query.as_ref()))
             .await?;
-        parse_ids(&mut self.conn.stream, self.unsolicited_responses_tx.clone())
+        let seqs = parse_ids(&mut self.conn.stream, self.unsolicited_responses_tx.clone()).await?;
+
+        Ok(seqs)
     }
 
     /// Equivalent to [`Session::search`], except that the returned identifiers
@@ -1160,7 +1176,9 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
     pub async fn uid_search<S: AsRef<str>>(&mut self, query: S) -> Result<HashSet<Uid>> {
         self.run_command(&format!("UID SEARCH {}", query.as_ref()))
             .await?;
-        parse_ids(&mut self.conn.stream, self.unsolicited_responses_tx.clone())
+        let uids = parse_ids(&mut self.conn.stream, self.unsolicited_responses_tx.clone()).await?;
+
+        Ok(uids)
     }
 
     // these are only here because they are public interface, the rest is in `Connection`
