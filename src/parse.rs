@@ -350,20 +350,17 @@ mod tests {
 
     fn input_stream(data: &[&str]) -> Vec<ResponseData> {
         data.iter()
-            .map(|line| {
-                println!("parsing {:?}", line);
-                match imap_proto::parse_response(line.as_bytes()) {
-                    Ok((remaining, response)) => {
-                        let response = unsafe { std::mem::transmute(response) };
-                        assert_eq!(remaining.len(), 0);
+            .map(|line| match imap_proto::parse_response(line.as_bytes()) {
+                Ok((remaining, response)) => {
+                    let response = unsafe { std::mem::transmute(response) };
+                    assert_eq!(remaining.len(), 0);
 
-                        ResponseData {
-                            raw: line.as_bytes().to_vec().into(),
-                            response,
-                        }
+                    ResponseData {
+                        raw: line.as_bytes().to_vec().into(),
+                        response,
                     }
-                    Err(err) => panic!("invalid input: {:?}", err),
                 }
+                Err(err) => panic!("invalid input: {:?}", err),
             })
             .collect()
     }

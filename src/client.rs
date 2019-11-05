@@ -1195,11 +1195,21 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
 
         Ok(())
     }
+
+    pub async fn read_response(&mut self) -> Option<ResponseData> {
+        let res = self.conn.read_response().await;
+        res
+    }
 }
 
 impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> + Unpin>
     Connection<T>
 {
+    async fn read_response(&mut self) -> Option<ResponseData> {
+        let res = self.stream.next().await;
+        res
+    }
+
     async fn run_command_untagged(&mut self, untagged_command: &str) -> Result<()> {
         self.stream
             .send(Request(None, untagged_command.as_bytes().into()))
@@ -1257,95 +1267,64 @@ mod tests {
     use super::super::mock_stream::MockStream;
     use super::*;
 
-    macro_rules! mock_session {
+    use imap_proto::Status;
+
+    macro_rules! mock_client {
         ($s:expr) => {
-            Session::new(Client::new($s).conn)
+            Client::new(ConnStream::new(Framed::new($s, ImapCodec::default())))
         };
     }
 
-    // #[test]
-    // fn read_response() {
-    //     let response = "a0 OK Logged in.\r\n";
-    //     let mock_stream = MockStream::new(response.as_bytes().to_vec());
-    //     let mut client = Client::new(mock_stream);
-    //     let actual_response = client.read_response().unwrap();
-    //     assert_eq!(Vec::<u8>::new(), actual_response);
-    // }
+    macro_rules! mock_session {
+        ($s:expr) => {
+            Session::new(mock_client!($s).conn)
+        };
+    }
 
-    // #[test]
-    // fn fetch_body() {
-    //     let response = "a0 OK Logged in.\r\n\
-    //                     * 2 FETCH (BODY[TEXT] {3}\r\nfoo)\r\n\
-    //                     a0 OK FETCH completed\r\n";
-    //     let mock_stream = MockStream::new(response.as_bytes().to_vec());
-    //     let mut session = mock_session!(mock_stream);
-    //     session.read_response().unwrap();
-    //     session.read_response().unwrap();
-    // }
+    #[async_attributes::test]
+    async fn fetch_body() {
+        let response = "a0 OK Logged in.\r\n\
+                        * 2 FETCH (BODY[TEXT] {3}\r\nfoo)\r\n\
+                        a0 OK FETCH completed\r\n";
+        let mut session = mock_session!(MockStream::new(response.as_bytes().to_vec()));
+        session.read_response().await.unwrap();
+        session.read_response().await.unwrap();
+    }
 
-    // #[test]
-    // fn read_greeting() {
-    //     let greeting = "* OK Dovecot ready.\r\n";
-    //     let mock_stream = MockStream::new(greeting.as_bytes().to_vec());
-    //     let mut client = Client::new(mock_stream);
-    //     client.read_greeting().unwrap();
-    // }
+    #[async_attributes::test]
+    async fn readline_delay_read() {
+        let greeting = "* OK Dovecot ready.\r\n";
+        let mock_stream = MockStream::default()
+            .with_buf(greeting.as_bytes().to_vec())
+            .with_delay();
 
-    // #[test]
-    // fn readline_delay_read() {
-    //     let greeting = "* OK Dovecot ready.\r\n";
-    //     let expected_response: String = greeting.to_string();
-    //     let mock_stream = MockStream::default()
-    //         .with_buf(greeting.as_bytes().to_vec())
-    //         .with_delay();
-    //     let mut client = Client::new(mock_stream);
-    //     let mut v = Vec::new();
-    //     client.readline(&mut v).unwrap();
-    //     let actual_response = String::from_utf8(v).unwrap();
-    //     assert_eq!(expected_response, actual_response);
-    // }
+        let mut client = mock_client!(mock_stream);
+        let actual_response = client.read_response().await.unwrap();
+        assert_eq!(
+            actual_response.parsed(),
+            &Response::Data {
+                status: Status::Ok,
+                code: None,
+                information: Some("Dovecot ready."),
+            }
+        );
+    }
 
-    // #[test]
-    // fn readline_eof() {
-    //     let mock_stream = MockStream::default().with_eof();
-    //     let mut client = Client::new(mock_stream);
-    //     let mut v = Vec::new();
-    //     if let Err(Error::ConnectionLost) = client.readline(&mut v) {
-    //     } else {
-    //         unreachable!("EOF read did not return connection lost");
-    //     }
-    // }
+    #[async_attributes::test]
+    async fn readline_eof() {
+        let mock_stream = MockStream::default().with_eof();
+        let mut client = mock_client!(mock_stream);
+        assert!(client.read_response().await.is_none());
+    }
 
-    // #[test]
-    // #[should_panic]
-    // fn readline_err() {
-    //     // TODO Check the error test
-    //     let mock_stream = MockStream::default().with_err();
-    //     let mut client = Client::new(mock_stream);
-    //     let mut v = Vec::new();
-    //     client.readline(&mut v).unwrap();
-    // }
-
-    // #[test]
-    // fn create_command() {
-    //     let base_command = "CHECK";
-    //     let mock_stream = MockStream::default();
-    //     let mut imap_stream = Client::new(mock_stream);
-
-    //     let expected_command = format!("a1 {}", base_command);
-    //     let command = imap_stream.create_command(&base_command);
-    //     assert!(
-    //         command == expected_command,
-    //         "expected command doesn't equal actual command"
-    //     );
-
-    //     let expected_command2 = format!("a2 {}", base_command);
-    //     let command2 = imap_stream.create_command(&base_command);
-    //     assert!(
-    //         command2 == expected_command2,
-    //         "expected command doesn't equal actual command"
-    //     );
-    // }
+    #[async_attributes::test]
+    #[should_panic]
+    async fn readline_err() {
+        // TODO Check the error test
+        let mock_stream = MockStream::default().with_err();
+        let mut client = mock_client!(mock_stream);
+        client.read_response().await.unwrap();
+    }
 
     // #[test]
     // fn authenticate() {
@@ -1373,33 +1352,36 @@ mod tests {
     //     );
     // }
 
-    // #[test]
-    // fn login() {
-    //     let response = b"a1 OK Logged in\r\n".to_vec();
-    //     let username = "username";
-    //     let password = "password";
-    //     let command = format!("a1 LOGIN {} {}\r\n", quote!(username), quote!(password));
-    //     let mock_stream = MockStream::new(response);
-    //     let client = Client::new(mock_stream);
-    //     let session = client.login(username, password).unwrap();
-    //     assert!(
-    //         session.stream.get_ref().written_buf == command.as_bytes().to_vec(),
-    //         "Invalid login command"
-    //     );
-    // }
+    #[async_attributes::test]
+    async fn login() {
+        let response = b"a1 OK Logged in\r\n".to_vec();
+        let username = "username";
+        let password = "password";
+        let command = format!("a1 LOGIN {} {}\r\n", quote!(username), quote!(password));
+        let mock_stream = MockStream::new(response);
+        let client = mock_client!(mock_stream);
+        if let Ok(session) = client.login(username, password).await {
+            assert!(
+                session.stream.stream.written_buf == command.as_bytes().to_vec(),
+                "Invalid login command"
+            );
+        } else {
+            unreachable!("invalid login");
+        }
+    }
 
-    // #[test]
-    // fn logout() {
-    //     let response = b"a1 OK Logout completed.\r\n".to_vec();
-    //     let command = format!("a1 LOGOUT\r\n");
-    //     let mock_stream = MockStream::new(response);
-    //     let mut session = mock_session!(mock_stream);
-    //     session.logout().unwrap();
-    //     assert!(
-    //         session.stream.get_ref().written_buf == command.as_bytes().to_vec(),
-    //         "Invalid logout command"
-    //     );
-    // }
+    #[async_attributes::test]
+    async fn logout() {
+        let response = b"a1 OK Logout completed.\r\n".to_vec();
+        let command = format!("a1 LOGOUT\r\n");
+        let mock_stream = MockStream::new(response);
+        let mut session = mock_session!(mock_stream);
+        session.logout().await.unwrap();
+        assert!(
+            session.stream.stream.written_buf == command.as_bytes().to_vec(),
+            "Invalid logout command"
+        );
+    }
 
     // #[test]
     // fn rename() {

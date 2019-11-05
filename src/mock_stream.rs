@@ -1,5 +1,9 @@
 use std::cmp::min;
-use std::io::{Error, ErrorKind, Read, Result, Write};
+use std::pin::Pin;
+
+use async_std::io::{Error, ErrorKind, Read, Result, Write};
+use async_std::prelude::*;
+use futures::task::{Context, Poll};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct MockStream {
@@ -51,15 +55,19 @@ impl MockStream {
 }
 
 impl Read for MockStream {
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        buf: &mut [u8],
+    ) -> Poll<Result<usize>> {
         if self.eof_on_read {
-            return Ok(0);
+            return Poll::Ready(Ok(0));
         }
         if self.err_on_read {
-            return Err(Error::new(ErrorKind::Other, "MockStream Error"));
+            return Poll::Ready(Err(Error::new(ErrorKind::Other, "MockStream Error")));
         }
         if self.read_pos >= self.read_buf.len() {
-            return Err(Error::new(ErrorKind::UnexpectedEof, "EOF"));
+            return Poll::Ready(Err(Error::new(ErrorKind::UnexpectedEof, "EOF")));
         }
         let mut write_len = min(buf.len(), self.read_buf.len() - self.read_pos);
         if self.read_delay > 0 {
@@ -71,17 +79,25 @@ impl Read for MockStream {
             buf[x - self.read_pos] = self.read_buf[x];
         }
         self.read_pos += write_len;
-        Ok(write_len)
+        Poll::Ready(Ok(write_len))
     }
 }
 
 impl Write for MockStream {
-    fn write(&mut self, buf: &[u8]) -> Result<usize> {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize>> {
         self.written_buf.extend_from_slice(buf);
-        Ok(buf.len())
+        Poll::Ready(Ok(buf.len()))
     }
 
-    fn flush(&mut self) -> Result<()> {
-        Ok(())
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<()>> {
+        Poll::Ready(Ok(()))
     }
 }

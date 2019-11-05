@@ -1,3 +1,5 @@
+use std::pin::Pin;
+
 use async_std::io;
 use async_std::stream::Stream;
 use bytes::{BufMut, Bytes, BytesMut};
@@ -5,7 +7,6 @@ use futures::task::{Context, Poll};
 use futures_codec::{Decoder, Encoder};
 use imap_proto::{RequestId, Response};
 use nom::Needed;
-use std::pin::Pin;
 
 pub struct ImapCodec {
     decode_need_message_bytes: usize,
@@ -102,7 +103,7 @@ impl ResponseData {
 pub struct ConnStream<
     T: Stream<Item = io::Result<ResponseData>> + futures::Sink<Request, Error = io::Error> + Unpin,
 > {
-    stream: T,
+    pub(crate) stream: T,
 }
 
 impl<
@@ -159,7 +160,7 @@ impl<
             Ok(res) => Poll::Ready(Some(res)),
             Err(err) => {
                 println!("error: {:#?}", err);
-                Poll::Pending
+                Poll::Ready(None)
             }
         }
     }
