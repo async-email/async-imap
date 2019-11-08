@@ -218,7 +218,7 @@ pub(crate) async fn parse_mailbox<T: Stream<Item = ResponseData> + Unpin>(
                 }
             }
             Response::MailboxData(m) => match m {
-                MailboxDatum::Status { mailbox, status } => {
+                MailboxDatum::Status { mailbox, .. } => {
                     unsolicited
                         .send(UnsolicitedResponse::Status {
                             mailbox: (*mailbox).into(),
@@ -292,7 +292,7 @@ async fn handle_unilateral<'a>(
     unsolicited: sync::Sender<UnsolicitedResponse>,
 ) -> Option<&'a ResponseData> {
     match res.parsed() {
-        Response::MailboxData(MailboxDatum::Status { mailbox, status }) => {
+        Response::MailboxData(MailboxDatum::Status { mailbox, .. }) => {
             unsolicited
                 .send(UnsolicitedResponse::Status {
                     mailbox: (*mailbox).into(),

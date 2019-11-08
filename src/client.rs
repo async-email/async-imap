@@ -348,7 +348,7 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
 {
     unsafe_pinned!(stream: T);
 
-    pub(crate) fn get_stream(mut self: Pin<&mut Self>) -> Pin<&mut T> {
+    pub(crate) fn get_stream(self: Pin<&mut Self>) -> Pin<&mut T> {
         self.stream()
     }
 
@@ -1136,8 +1136,8 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
     /// failing that, a `CHECK` command) after one or more `APPEND` commands.
     pub async fn append<S: AsRef<str>, B: AsRef<[u8]>>(
         &mut self,
-        mailbox: S,
-        content: B,
+        _mailbox: S,
+        _content: B,
     ) -> Result<()> {
         unimplemented!();
         // let content = content.as_ref();
@@ -1293,21 +1293,27 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
     }
 
     pub(crate) async fn run_command_and_check_ok(&mut self, untagged_command: &str) -> Result<()> {
-        self.run_command(untagged_command).await?;
-        self.check_ok().await?;
+        let id = self.run_command(untagged_command).await?;
+        self.check_ok(id).await?;
 
         Ok(())
     }
 
-    pub(crate) async fn check_ok(&mut self) -> io::Result<()> {
+    pub(crate) async fn check_ok(&mut self, id: RequestId) -> io::Result<()> {
         loop {
             if let Some(res) = self.stream.next().await {
                 println!("S: {:#?}", res);
                 match res.parsed() {
                     Response::Done { status, tag, .. } => {
-                        // TODO: check tag
                         if let imap_proto::Status::Ok = status {
-                            break Ok(());
+                            if tag == &id {
+                                break Ok(());
+                            } else {
+                                break Err(io::Error::new(
+                                    io::ErrorKind::Other,
+                                    format!("unsolicited reponse: {:?}", tag),
+                                ));
+                            }
                         } else {
                             break Err(io::Error::new(
                                 io::ErrorKind::Other,
@@ -1527,7 +1533,7 @@ mod tests {
         let response = b"A0001 OK EXPUNGE completed\r\n".to_vec();
         let mock_stream = MockStream::new(response);
         let mut session = mock_session!(mock_stream);
-        session.expunge().await.unwrap();
+        session.expunge().await.unwrap().collect::<Vec<_>>().await;
         assert!(
             session.stream.stream.written_buf == b"A0001 EXPUNGE\r\n".to_vec(),
             "Invalid expunge command"

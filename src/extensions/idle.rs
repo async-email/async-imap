@@ -7,7 +7,7 @@ use async_std::io;
 use async_std::prelude::*;
 use async_std::stream::Stream;
 use futures::task::{Context, Poll};
-use imap_proto::Response;
+use imap_proto::{RequestId, Response};
 
 use crate::client::Session;
 use crate::codec::{Request, ResponseData};
@@ -33,6 +33,7 @@ pub struct Handle<
     T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> + Unpin,
 > {
     session: Session<T>,
+    id: Option<RequestId>,
 }
 
 impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> + Unpin> Unpin
@@ -84,7 +85,7 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
     unsafe_pinned!(session: Session<T>);
 
     pub fn new(session: Session<T>) -> Handle<T> {
-        Handle { session }
+        Handle { session, id: None }
     }
 
     pub fn stream(&mut self) -> IdleStream<'_, Self> {
@@ -92,7 +93,8 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
     }
 
     pub async fn init(&mut self) -> Result<()> {
-        self.session.run_command("IDLE").await?;
+        let id = self.session.run_command("IDLE").await?;
+        self.id = Some(id);
         while let Some(res) = self.session.stream.next().await {
             match res.parsed() {
                 Response::Continue { .. } => {
@@ -110,7 +112,9 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
 
     pub async fn done(mut self) -> Result<Session<T>> {
         self.session.run_command_untagged("DONE").await?;
-        self.session.check_ok().await?;
+        self.session
+            .check_ok(self.id.expect("invalid setup"))
+            .await?;
 
         Ok(self.session)
     }
