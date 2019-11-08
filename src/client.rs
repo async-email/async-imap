@@ -1244,16 +1244,14 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
     }
 
     /// Runs any command passed to it.
-    pub async fn run_command<S: AsRef<str>>(&mut self, untagged_command: S) -> Result<RequestId> {
-        let id = self.conn.run_command(untagged_command.as_ref()).await?;
+    pub async fn run_command<S: AsRef<str>>(&mut self, command: S) -> Result<RequestId> {
+        let id = self.conn.run_command(command.as_ref()).await?;
 
         Ok(id)
     }
 
-    pub async fn run_command_untagged<S: AsRef<str>>(&mut self, untagged_command: S) -> Result<()> {
-        self.conn
-            .run_command_untagged(untagged_command.as_ref())
-            .await?;
+    pub async fn run_command_untagged<S: AsRef<str>>(&mut self, command: S) -> Result<()> {
+        self.conn.run_command_untagged(command.as_ref()).await?;
 
         Ok(())
     }
@@ -1272,59 +1270,57 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
         res
     }
 
-    pub(crate) async fn run_command_untagged(&mut self, untagged_command: &str) -> Result<()> {
+    pub(crate) async fn run_command_untagged(&mut self, command: &str) -> Result<()> {
         self.stream
-            .send(Request(None, untagged_command.as_bytes().into()))
+            .send(Request(None, command.as_bytes().into()))
             .await?;
         self.stream.flush().await?;
         Ok(())
     }
 
-    pub(crate) async fn run_command(&mut self, untagged_command: &str) -> Result<RequestId> {
+    pub(crate) async fn run_command(&mut self, command: &str) -> Result<RequestId> {
         let request_id = self.request_ids.next().unwrap(); // safe: never returns Err
         self.stream
-            .send(Request(
-                Some(request_id.clone()),
-                untagged_command.as_bytes().into(),
-            ))
+            .send(Request(Some(request_id.clone()), command.as_bytes().into()))
             .await?;
         self.stream.flush().await?;
         Ok(request_id)
     }
 
-    pub(crate) async fn run_command_and_check_ok(&mut self, untagged_command: &str) -> Result<()> {
-        let id = self.run_command(untagged_command).await?;
+    /// Execute a command and check that the next response is a matching done.
+    pub(crate) async fn run_command_and_check_ok(&mut self, command: &str) -> Result<()> {
+        let id = self.run_command(command).await?;
         self.check_ok(id).await?;
 
         Ok(())
     }
 
-    pub(crate) async fn check_ok(&mut self, id: RequestId) -> io::Result<()> {
-        loop {
-            if let Some(res) = self.stream.next().await {
-                println!("S: {:#?}", res);
-                match res.parsed() {
-                    Response::Done { status, tag, .. } => {
-                        if let imap_proto::Status::Ok = status {
-                            if tag == &id {
-                                break Ok(());
-                            } else {
-                                break Err(io::Error::new(
-                                    io::ErrorKind::Other,
-                                    format!("unsolicited reponse: {:?}", tag),
-                                ));
-                            }
+    pub(crate) async fn check_ok(&mut self, id: RequestId) -> Result<()> {
+        while let Some(res) = self.stream.next().await {
+            println!("S: {:#?}", res);
+            match res.parsed() {
+                Response::Done { status, tag, .. } => {
+                    if let imap_proto::Status::Ok = status {
+                        if tag == &id {
+                            return Ok(());
                         } else {
-                            break Err(io::Error::new(
+                            return Err(Error::Io(io::Error::new(
                                 io::ErrorKind::Other,
-                                format!("fail: {:?}", status),
-                            ));
+                                format!("unsolicited reponse: {:?}", tag),
+                            )));
                         }
+                    } else {
+                        return Err(Error::Io(io::Error::new(
+                            io::ErrorKind::Other,
+                            format!("fail: {:?}", status),
+                        )));
                     }
-                    _ => {}
                 }
+                _ => {}
             }
         }
+
+        Err(Error::ConnectionLost)
     }
 }
 
