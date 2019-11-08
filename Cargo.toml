@@ -1,6 +1,6 @@
 [package]
 name = "imap"
-version = "1.0.2"
+version = "1.0.0"
 authors = ["dignifiedquire <me@dignifiedquire.com>",
            "Matt McCoy <mattnenterprise@yahoo.com>",
            "Jon Gjengset <jon@thesquareplanet.com>"]
@@ -16,8 +16,6 @@ keywords = ["email", "imap"]
 categories = ["email", "network-programming"]
 
 [badges]
-azure-devops = { project = "jonhoo/jonhoo", pipeline = "imap", build = "11" }
-codecov = { repository = "jonhoo/rust-imap", branch = "master", service = "github" }
 maintenance = { status = "actively-developed" }
 is-it-maintained-issue-resolution = { repository = "jonhoo/rust-imap" }
 is-it-maintained-open-issues = { repository = "jonhoo/rust-imap" }
@@ -32,12 +30,12 @@ nom = "5.0"
 base64 = "0.10"
 chrono = "0.4"
 lazy_static = "1.4"
-async-tls = "0.5.0"
+async-tls = { git = "https://github.com/async-rs/async-tls" }
 async-std = { git = "https://github.com/async-rs/async-std", features = ["unstable"] }
 pin-utils = "0.1.0-alpha.4"
-futures_codec = { git = "https://github.com/dignifiedquire/futures-codec", branch = "imap" }
+futures_codec = "0.3"
 bytes = "0.4.12"
-futures-preview = "0.3.0-alpha.19"
+futures = "0.3.0"
 async-attributes = "1.1.0"
 
 [dev-dependencies]
