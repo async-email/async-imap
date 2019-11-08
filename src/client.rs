@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::ops::{Deref, DerefMut};
+use std::pin::Pin;
 use std::str;
 
 use async_std::io;
@@ -16,6 +17,7 @@ use super::error::{Error, Result, ValidateError};
 use super::parse::*;
 use super::types::*;
 use crate::codec::{ConnStream, IdGenerator, ImapCodec, Request, ResponseData};
+use crate::extensions;
 
 static TAG_PREFIX: &str = "a";
 const INITIAL_TAG: u32 = 0;
@@ -368,6 +370,12 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
 impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> + Unpin>
     Session<T>
 {
+    unsafe_pinned!(stream: T);
+
+    pub(crate) fn get_stream(mut self: Pin<&mut Self>) -> Pin<&mut T> {
+        self.stream()
+    }
+
     // not public, just to avoid duplicating the channel creation code
     fn new(conn: Connection<T>) -> Self {
         let (tx, rx) = sync::channel(100);
@@ -1067,10 +1075,8 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
     /// command, as specified in the base IMAP specification.
     ///
     /// See [`extensions::idle::Handle`] for details.
-    pub fn idle(&mut self) -> Result<()> {
-        //extensions::idle::Handle<'_, T>> {
-        // extensions::idle::Handle::make(self)
-        unimplemented!()
+    pub fn idle(self) -> extensions::idle::Handle<T> {
+        extensions::idle::Handle::new(self)
     }
 
     /// The [`APPEND` command](https://tools.ietf.org/html/rfc3501#section-6.3.11) appends
@@ -1196,6 +1202,14 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
         Ok(())
     }
 
+    pub async fn run_command_untagged<S: AsRef<str>>(&mut self, untagged_command: S) -> Result<()> {
+        self.conn
+            .run_command_untagged(untagged_command.as_ref())
+            .await?;
+
+        Ok(())
+    }
+
     pub async fn read_response(&mut self) -> Option<ResponseData> {
         let res = self.conn.read_response().await;
         res
@@ -1210,7 +1224,7 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
         res
     }
 
-    async fn run_command_untagged(&mut self, untagged_command: &str) -> Result<()> {
+    pub(crate) async fn run_command_untagged(&mut self, untagged_command: &str) -> Result<()> {
         self.stream
             .send(Request(None, untagged_command.as_bytes().into()))
             .await?;
@@ -1218,7 +1232,7 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
         Ok(())
     }
 
-    async fn run_command(&mut self, untagged_command: &str) -> Result<()> {
+    pub(crate) async fn run_command(&mut self, untagged_command: &str) -> Result<()> {
         let request_id = self.request_ids.next().unwrap(); // safe: never returns Err
         self.stream
             .send(Request(
@@ -1231,14 +1245,14 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
         Ok(())
     }
 
-    async fn run_command_and_check_ok(&mut self, untagged_command: &str) -> Result<()> {
+    pub(crate) async fn run_command_and_check_ok(&mut self, untagged_command: &str) -> Result<()> {
         self.run_command(untagged_command).await?;
         self.check_ok().await?;
 
         Ok(())
     }
 
-    async fn check_ok(&mut self) -> io::Result<()> {
+    pub(crate) async fn check_ok(&mut self) -> io::Result<()> {
         loop {
             if let Some(res) = self.stream.next().await {
                 println!("S: {:#?}", res);

@@ -1,13 +1,17 @@
 //! Adds support for the IMAP IDLE command specificed in [RFC
 //! 2177](https://tools.ietf.org/html/rfc2177).
 
-use crate::client::Session;
-use crate::error::{Error, Result};
+use std::pin::Pin;
 
-use async_std::io::{self, Read, Write};
-use async_std::net::TcpStream;
-use async_tls::client::TlsStream;
-use std::time::Duration;
+use async_std::io;
+use async_std::prelude::*;
+use async_std::stream::Stream;
+use futures::task::{Context, Poll};
+use imap_proto::Response;
+
+use crate::client::Session;
+use crate::codec::{Request, ResponseData};
+use crate::error::Result;
 
 /// `Handle` allows a client to block waiting for changes to the remote mailbox.
 ///
@@ -25,149 +29,85 @@ use std::time::Duration;
 ///
 /// As long as a [`Handle`] is active, the mailbox cannot be otherwise accessed.
 #[derive(Debug)]
-pub struct Handle<'a, T: Read + Write> {
-    session: &'a mut Session<T>,
-    keepalive: Duration,
-    done: bool,
+pub struct Handle<
+    T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> + Unpin,
+> {
+    session: Session<T>,
 }
 
-/// Must be implemented for a transport in order for a `Session` using that transport to support
-/// operations with timeouts.
-///
-/// Examples of where this is useful is for `Handle::wait_keepalive` and
-/// `Handle::wait_timeout`.
-pub trait SetReadTimeout {
-    /// Set the timeout for subsequent reads to the given one.
-    ///
-    /// If `timeout` is `None`, the read timeout should be removed.
-    ///
-    /// See also `std::net::TcpStream::set_read_timeout`.
-    fn set_read_timeout(&mut self, timeout: Option<Duration>) -> Result<()>;
+impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> + Unpin> Unpin
+    for Handle<T>
+{
 }
 
-// impl<'a, T: Read + Write + 'a> Handle<'a, T> {
-//     pub(crate) fn make(session: &'a mut Session<T>) -> Result<Self> {
-//         let mut h = Handle {
-//             session,
-//             keepalive: Duration::from_secs(29 * 60),
-//             done: false,
-//         };
-//         h.init()?;
-//         Ok(h)
-//     }
+impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> + Unpin> Stream
+    for Handle<T>
+{
+    type Item = ResponseData;
 
-//     fn init(&mut self) -> Result<()> {
-//         // https://tools.ietf.org/html/rfc2177
-//         //
-//         // The IDLE command takes no arguments.
-//         self.session.run_command("IDLE")?;
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.as_mut().session().get_stream().poll_next(cx)
+    }
+}
 
-//         // A tagged response will be sent either
-//         //
-//         //   a) if there's an error, or
-//         //   b) *after* we send DONE
-//         let mut v = Vec::new();
-//         self.session.readline(&mut v)?;
-//         if v.starts_with(b"+") {
-//             self.done = false;
-//             return Ok(());
-//         }
+#[derive(Debug)]
+#[must_use = "futures do nothing unless polled"]
+pub struct IdleStream<'a, St> {
+    stream: &'a mut St,
+}
 
-//         self.session.read_response_onto(&mut v)?;
-//         // We should *only* get a continuation on an error (i.e., it gives BAD or NO).
-//         unreachable!();
-//     }
+impl<St: Stream + Unpin> Unpin for IdleStream<'_, St> {}
 
-//     fn terminate(&mut self) -> Result<()> {
-//         if !self.done {
-//             self.done = true;
-//             self.session.write_line(b"DONE")?;
-//             self.session.read_response().map(|_| ())
-//         } else {
-//             Ok(())
-//         }
-//     }
+impl<'a, St: Stream + Unpin> IdleStream<'a, St> {
+    unsafe_pinned!(stream: &'a mut St);
 
-//     /// Internal helper that doesn't consume self.
-//     ///
-//     /// This is necessary so that we can keep using the inner `Session` in `wait_keepalive`.
-//     fn wait_inner(&mut self) -> Result<()> {
-//         let mut v = Vec::new();
-//         match self.session.readline(&mut v).map(|_| ()) {
-//             Err(Error::Io(ref e))
-//                 if e.kind() == io::ErrorKind::TimedOut || e.kind() == io::ErrorKind::WouldBlock =>
-//             {
-//                 // we need to refresh the IDLE connection
-//                 self.terminate()?;
-//                 self.init()?;
-//                 self.wait_inner()
-//             }
-//             r => r,
-//         }
-//     }
+    pub fn new(stream: &'a mut St) -> Self {
+        IdleStream { stream }
+    }
+}
 
-//     /// Block until the selected mailbox changes.
-//     pub fn wait(mut self) -> Result<()> {
-//         self.wait_inner()
-//     }
-// }
+impl<St: futures::stream::FusedStream + Unpin> futures::stream::FusedStream for IdleStream<'_, St> {
+    fn is_terminated(&self) -> bool {
+        self.stream.is_terminated()
+    }
+}
 
-// impl<'a, T: SetReadTimeout + Read + Write + 'a> Handle<'a, T> {
-//     /// Set the keep-alive interval to use when `wait_keepalive` is called.
-//     ///
-//     /// The interval defaults to 29 minutes as dictated by RFC 2177.
-//     pub fn set_keepalive(&mut self, interval: Duration) {
-//         self.keepalive = interval;
-//     }
+impl<St: Stream + Unpin> Stream for IdleStream<'_, St> {
+    type Item = St::Item;
 
-//     /// Block until the selected mailbox changes.
-//     ///
-//     /// This method differs from [`Handle::wait`] in that it will periodically refresh the IDLE
-//     /// connection, to prevent the server from timing out our connection. The keepalive interval is
-//     /// set to 29 minutes by default, as dictated by RFC 2177, but can be changed using
-//     /// [`Handle::set_keepalive`].
-//     ///
-//     /// This is the recommended method to use for waiting.
-//     pub fn wait_keepalive(self) -> Result<()> {
-//         // The server MAY consider a client inactive if it has an IDLE command
-//         // running, and if such a server has an inactivity timeout it MAY log
-//         // the client off implicitly at the end of its timeout period.  Because
-//         // of that, clients using IDLE are advised to terminate the IDLE and
-//         // re-issue it at least every 29 minutes to avoid being logged off.
-//         // This still allows a client to receive immediate mailbox updates even
-//         // though it need only "poll" at half hour intervals.
-//         let keepalive = self.keepalive;
-//         self.wait_timeout(keepalive)
-//     }
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.stream().poll_next(cx)
+    }
+}
 
-//     /// Block until the selected mailbox changes, or until the given amount of time has expired.
-//     pub fn wait_timeout(mut self, timeout: Duration) -> Result<()> {
-//         self.session
-//             .stream
-//             .get_mut()
-//             .set_read_timeout(Some(timeout))?;
-//         let res = self.wait_inner();
-//         let _ = self.session.stream.get_mut().set_read_timeout(None).is_ok();
-//         res
-//     }
-// }
+impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> + Unpin> Handle<T> {
+    unsafe_pinned!(session: Session<T>);
 
-// impl<'a, T: Read + Write + 'a> Drop for Handle<'a, T> {
-//     fn drop(&mut self) {
-//         // we don't want to panic here if we can't terminate the Idle
-//         let _ = self.terminate().is_ok();
-//     }
-// }
+    pub fn new(session: Session<T>) -> Handle<T> {
+        Handle { session }
+    }
 
-// impl<'a> SetReadTimeout for TcpStream {
-//     fn set_read_timeout(&mut self, timeout: Option<Duration>) -> Result<()> {
-//         TcpStream::set_read_timeout(self, timeout).map_err(Error::Io)
-//     }
-// }
+    pub fn stream(&mut self) -> IdleStream<'_, Self> {
+        IdleStream::new(self)
+    }
 
-// #[cfg(feature = "tls")]
-// impl<'a> SetReadTimeout for TlsStream<TcpStream> {
-//     fn set_read_timeout(&mut self, timeout: Option<Duration>) -> Result<()> {
-//         self.get_ref().set_read_timeout(timeout).map_err(Error::Io)
-//     }
-// }
+    pub async fn init(&mut self) -> Result<()> {
+        self.session.run_command("IDLE").await?;
+        let res = self.session.stream.next().await.unwrap();
+        match res.parsed() {
+            v @ Response::Continue { .. } => {
+                return Ok(());
+            }
+            _ => {}
+        }
+
+        Err(io::Error::new(io::ErrorKind::ConnectionRefused, "").into())
+    }
+
+    pub async fn done(mut self) -> Result<Session<T>> {
+        self.session.run_command_untagged("DONE").await?;
+        self.session.check_ok().await?;
+
+        Ok(self.session)
+    }
+}
