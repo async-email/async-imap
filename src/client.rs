@@ -1,9 +1,10 @@
 use std::collections::HashSet;
+use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::str;
 
-use async_std::io;
+use async_std::io::{self, Read, Write};
 use async_std::net::{TcpStream, ToSocketAddrs};
 use async_std::prelude::*;
 use async_std::sync;
@@ -35,7 +36,7 @@ macro_rules! quote {
 // Both `Client` and `Session` deref to [`Connection`](struct.Connection.html), the underlying
 // primitives type.
 #[derive(Debug)]
-pub struct Session<T> {
+pub struct Session<T: Read + Write + Unpin + fmt::Debug> {
     conn: Connection<T>,
     unsolicited_responses_tx: sync::Sender<UnsolicitedResponse>,
 
@@ -43,9 +44,10 @@ pub struct Session<T> {
     /// [unilateral server responses in RFC 3501](https://tools.ietf.org/html/rfc3501#section-7).
     pub unsolicited_responses: sync::Receiver<UnsolicitedResponse>,
 }
-impl<T: Stream + futures::Sink<Request> + Unpin> Unpin for Session<T> {}
-impl<T: Stream + futures::Sink<Request> + Unpin> Unpin for Client<T> {}
-impl<T: Stream + futures::Sink<Request> + Unpin> Unpin for Connection<T> {}
+
+impl<T: Read + Write + Unpin + fmt::Debug> Unpin for Session<T> {}
+impl<T: Read + Write + Unpin + fmt::Debug> Unpin for Client<T> {}
+impl<T: Read + Write + Unpin + fmt::Debug> Unpin for Connection<T> {}
 
 /// An (unauthenticated) handle to talk to an IMAP server. This is what you get when first
 /// connecting. A succesfull call to [`Client::login`] or [`Client::authenticate`] will return a
@@ -53,7 +55,7 @@ impl<T: Stream + futures::Sink<Request> + Unpin> Unpin for Connection<T> {}
 // Both `Client` and `Session` deref to [`Connection`](struct.Connection.html), the underlying
 // primitives type.
 #[derive(Debug)]
-pub struct Client<T> {
+pub struct Client<T: Read + Write + Unpin + fmt::Debug> {
     conn: Connection<T>,
 }
 
@@ -61,8 +63,8 @@ pub struct Client<T> {
 /// login) use a `Connection` internally for the TCP stream primitives.
 #[derive(Debug)]
 #[doc(hidden)]
-pub struct Connection<T> {
-    pub(crate) stream: T,
+pub struct Connection<T: Read + Write + Unpin + fmt::Debug> {
+    pub(crate) stream: ConnStream<Framed<T, ImapCodec>>,
 
     /// Enable debug mode for this connection so that all client-server interactions are printed to
     /// `STDERR`.
@@ -77,7 +79,7 @@ pub struct Connection<T> {
 
 // `Deref` instances are so we can make use of the same underlying primitives in `Client` and
 // `Session`
-impl<T> Deref for Client<T> {
+impl<T: Read + Write + Unpin + fmt::Debug> Deref for Client<T> {
     type Target = Connection<T>;
 
     fn deref(&self) -> &Connection<T> {
@@ -85,13 +87,13 @@ impl<T> Deref for Client<T> {
     }
 }
 
-impl<T> DerefMut for Client<T> {
+impl<T: Read + Write + Unpin + fmt::Debug> DerefMut for Client<T> {
     fn deref_mut(&mut self) -> &mut Connection<T> {
         &mut self.conn
     }
 }
 
-impl<T> Deref for Session<T> {
+impl<T: Read + Write + Unpin + fmt::Debug> Deref for Session<T> {
     type Target = Connection<T>;
 
     fn deref(&self) -> &Connection<T> {
@@ -99,7 +101,7 @@ impl<T> Deref for Session<T> {
     }
 }
 
-impl<T> DerefMut for Session<T> {
+impl<T: Read + Write + Unpin + fmt::Debug> DerefMut for Session<T> {
     fn deref_mut(&mut self) -> &mut Connection<T> {
         &mut self.conn
     }
@@ -129,20 +131,18 @@ pub async fn connect<A: ToSocketAddrs, S: AsRef<str>>(
     addr: A,
     domain: S,
     ssl_connector: &TlsConnector,
-) -> Result<Client<ConnStream<Framed<TlsStream<TcpStream>, ImapCodec>>>> {
+) -> Result<Client<TlsStream<TcpStream>>> {
     let stream = TcpStream::connect(addr).await?;
     let handshake = ssl_connector.connect(domain.as_ref(), stream)?;
     let ssl_stream = handshake.await?;
 
-    let mut stream = Framed::new(ssl_stream, ImapCodec::default());
-    let _greeting = stream.next().await.unwrap()?;
+    let mut client = Client::new(ssl_stream);
+    let _greeting = client.read_response().await.unwrap();
 
-    let conn_stream = ConnStream::new(stream);
-
-    Ok(Client::new(conn_stream))
+    Ok(client)
 }
 
-impl Client<ConnStream<Framed<TcpStream, ImapCodec>>> {
+impl Client<TcpStream> {
     /// This will upgrade an IMAP client from using a regular TCP connection to use TLS.
     ///
     /// The domain parameter is required to perform hostname verification.
@@ -150,15 +150,13 @@ impl Client<ConnStream<Framed<TcpStream, ImapCodec>>> {
         mut self,
         domain: S,
         ssl_connector: &TlsConnector,
-    ) -> Result<Client<ConnStream<Framed<TlsStream<TcpStream>, ImapCodec>>>> {
+    ) -> Result<Client<TlsStream<TcpStream>>> {
         self.run_command_and_check_ok("STARTTLS").await?;
         let ssl_stream = ssl_connector
             .connect(domain.as_ref(), self.conn.stream.into_inner().release().0)?
             .await?;
-        let stream = Framed::new(ssl_stream, ImapCodec::default());
-        let conn_stream = ConnStream::new(stream);
 
-        let client = Client::new(conn_stream);
+        let client = Client::new(ssl_stream);
         Ok(client)
     }
 }
@@ -179,7 +177,7 @@ macro_rules! ok_or_unauth_client_err {
     };
 }
 
-impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> + Unpin> Client<T> {
+impl<T: Read + Write + Unpin + fmt::Debug> Client<T> {
     /// Creates a new client over the given stream.
     ///
     /// For an example of how to use this method to provide a pure-Rust TLS integration, see the
@@ -188,9 +186,11 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
     /// This method primarily exists for writing tests that mock the underlying transport, but can
     /// also be used to support IMAP over custom tunnels.
     pub fn new(stream: T) -> Client<T> {
+        let framed = Framed::new(stream, ImapCodec::default());
+
         Client {
             conn: Connection {
-                stream,
+                stream: ConnStream::new(framed),
                 debug: false,
                 greeting_read: false,
                 request_ids: IdGenerator::new(),
@@ -343,13 +343,11 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
     }
 }
 
-impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> + Unpin>
-    Session<T>
-{
-    unsafe_pinned!(stream: T);
+impl<T: Read + Write + Unpin + fmt::Debug> Session<T> {
+    unsafe_pinned!(conn: Connection<T>);
 
-    pub(crate) fn get_stream(self: Pin<&mut Self>) -> Pin<&mut T> {
-        self.stream()
+    pub(crate) fn get_stream(self: Pin<&mut Self>) -> Pin<&mut ConnStream<Framed<T, ImapCodec>>> {
+        self.conn().stream()
     }
 
     // not public, just to avoid duplicating the channel creation code
@@ -1264,9 +1262,9 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
     }
 }
 
-impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> + Unpin>
-    Connection<T>
-{
+impl<T: Read + Write + Unpin + fmt::Debug> Connection<T> {
+    unsafe_pinned!(stream: ConnStream<Framed<T, ImapCodec>>);
+
     async fn read_response(&mut self) -> Option<ResponseData> {
         let res = self.stream.next().await;
         res
@@ -1348,7 +1346,7 @@ mod tests {
 
     macro_rules! mock_client {
         ($s:expr) => {
-            Client::new(ConnStream::new(Framed::new($s, ImapCodec::default())))
+            Client::new($s)
         };
     }
 
@@ -1787,12 +1785,7 @@ mod tests {
 
     async fn generic_store<'a, F, T, K>(prefix: &'a str, op: F)
     where
-        F: 'a
-            + FnOnce(
-                Arc<Mutex<Session<ConnStream<Framed<MockStream, ImapCodec>>>>>,
-                &'a str,
-                &'a str,
-            ) -> K,
+        F: 'a + FnOnce(Arc<Mutex<Session<MockStream>>>, &'a str, &'a str) -> K,
         K: 'a + Future<Output = Result<T>>,
     {
         let res = "* 2 FETCH (FLAGS (\\Deleted \\Seen))\r\n\
@@ -1827,12 +1820,7 @@ mod tests {
 
     async fn generic_copy<'a, F, T, K>(prefix: &'a str, op: F)
     where
-        F: 'a
-            + FnOnce(
-                Arc<Mutex<Session<ConnStream<Framed<MockStream, ImapCodec>>>>>,
-                &'a str,
-                &'a str,
-            ) -> K,
+        F: 'a + FnOnce(Arc<Mutex<Session<MockStream>>>, &'a str, &'a str) -> K,
         K: 'a + Future<Output = Result<T>>,
     {
         generic_with_uid(
@@ -1917,12 +1905,7 @@ mod tests {
 
     async fn generic_fetch<'a, F, T, K>(prefix: &'a str, op: F)
     where
-        F: 'a
-            + FnOnce(
-                Arc<Mutex<Session<ConnStream<Framed<MockStream, ImapCodec>>>>>,
-                &'a str,
-                &'a str,
-            ) -> K,
+        F: 'a + FnOnce(Arc<Mutex<Session<MockStream>>>, &'a str, &'a str) -> K,
         K: 'a + Future<Output = Result<T>>,
     {
         generic_with_uid("OK FETCH completed\r\n", "FETCH", "1", "BODY[]", prefix, op).await;
@@ -1936,12 +1919,7 @@ mod tests {
         prefix: &'a str,
         op: F,
     ) where
-        F: 'a
-            + FnOnce(
-                Arc<Mutex<Session<ConnStream<Framed<MockStream, ImapCodec>>>>>,
-                &'a str,
-                &'a str,
-            ) -> K,
+        F: 'a + FnOnce(Arc<Mutex<Session<MockStream>>>, &'a str, &'a str) -> K,
         K: 'a + Future<Output = Result<T>>,
     {
         let resp = format!("A0001 {}\r\n", res).as_bytes().to_vec();

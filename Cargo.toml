@@ -43,6 +43,9 @@ rental = "0.5.5"
 lettre = "0.9"
 lettre_email = "0.9"
 rustls-connector = "0.8.0"
+rustls = { version = "0.16.0", features = ["dangerous_configuration"] }
+native-tls = "0.2.3"
+webpki = "0.21.0"
 
 [[example]]
 name = "basic"
@@ -55,3 +58,7 @@ required-features = ["default"]
 [[test]]
 name = "imap_integration"
 required-features = ["default"]
+
+
+[patch.'https://github.com/async-rs/async-std']
+async-std = { path = "../async-std" }

@@ -1,235 +1,308 @@
-// extern crate imap;
-// extern crate lettre;
-// extern crate lettre_email;
-// extern crate native_tls;
+extern crate async_imap;
+extern crate async_tls;
+extern crate lettre;
+extern crate lettre_email;
+extern crate native_tls;
+extern crate rustls;
 
-// use lettre::Transport;
-// use std::net::TcpStream;
+use async_imap::Session;
+use async_std::net::TcpStream;
+use async_std::prelude::*;
+use async_std::sync::Arc;
+use lettre::Transport;
 
-// fn tls() -> native_tls::TlsConnector {
-//     native_tls::TlsConnector::builder()
-//         .danger_accept_invalid_certs(true)
-//         .danger_accept_invalid_hostnames(true)
-//         .build()
-//         .unwrap()
-// }
+fn native_tls() -> native_tls::TlsConnector {
+    native_tls::TlsConnector::builder()
+        .danger_accept_invalid_certs(true)
+        .danger_accept_invalid_hostnames(true)
+        .build()
+        .unwrap()
+}
 
-// fn session(user: &str) -> imap::Session<native_tls::TlsStream<TcpStream>> {
-//     let mut s = imap::connect(
-//         &format!(
-//             "{}:3993",
-//             std::env::var("TEST_HOST").unwrap_or("127.0.0.1".to_string())
-//         ),
-//         "imap.example.com",
-//         &tls(),
-//     )
-//     .unwrap()
-//     .login(user, user)
-//     .unwrap();
-//     s.debug = true;
-//     s
-// }
+pub struct NoCertificateVerification {}
 
-// fn smtp(user: &str) -> lettre::SmtpTransport {
-//     let creds = lettre::smtp::authentication::Credentials::new(user.to_string(), user.to_string());
-//     lettre::SmtpClient::new(
-//         &format!(
-//             "{}:3465",
-//             std::env::var("TEST_HOST").unwrap_or("127.0.0.1".to_string())
-//         ),
-//         lettre::ClientSecurity::Wrapper(lettre::ClientTlsParameters {
-//             connector: tls(),
-//             domain: "smpt.example.com".to_string(),
-//         }),
-//     )
-//     .unwrap()
-//     .credentials(creds)
-//     .transport()
-// }
+impl rustls::ServerCertVerifier for NoCertificateVerification {
+    fn verify_server_cert(
+        &self,
+        _roots: &rustls::RootCertStore,
+        _presented_certs: &[rustls::Certificate],
+        _dns_name: webpki::DNSNameRef<'_>,
+        _ocsp: &[u8],
+    ) -> Result<rustls::ServerCertVerified, rustls::TLSError> {
+        Ok(rustls::ServerCertVerified::assertion())
+    }
+}
 
-// #[test]
-// #[ignore]
-// fn connect_insecure_then_secure() {
-//     let host = std::env::var("TEST_HOST").unwrap_or("127.0.0.1".to_string());
-//     let stream = TcpStream::connect((host.as_ref(), 3143)).unwrap();
+fn tls() -> async_tls::TlsConnector {
+    let mut config = rustls::ClientConfig::new();
+    config
+        .dangerous()
+        .set_certificate_verifier(Arc::new(NoCertificateVerification {}));
+    Arc::new(config).into()
+}
 
-//     // ignored because of https://github.com/greenmail-mail-test/greenmail/issues/135
-//     imap::Client::new(stream)
-//         .secure("imap.example.com", &tls())
-//         .unwrap();
-// }
+async fn session(user: &str) -> Session<async_tls::client::TlsStream<TcpStream>> {
+    let mut s = async_imap::connect(
+        &format!(
+            "{}:3993",
+            std::env::var("TEST_HOST").unwrap_or("127.0.0.1".to_string())
+        ),
+        "imap.example.com",
+        &tls(),
+    )
+    .await
+    .unwrap()
+    .login(user, user)
+    .await
+    .ok()
+    .unwrap();
+    s.debug = true;
+    s
+}
 
-// #[test]
-// fn connect_secure() {
-//     imap::connect(
-//         &format!(
-//             "{}:3993",
-//             std::env::var("TEST_HOST").unwrap_or("127.0.0.1".to_string())
-//         ),
-//         "imap.example.com",
-//         &tls(),
-//     )
-//     .unwrap();
-// }
+fn smtp(user: &str) -> lettre::SmtpTransport {
+    let creds = lettre::smtp::authentication::Credentials::new(user.to_string(), user.to_string());
+    lettre::SmtpClient::new(
+        &format!(
+            "{}:3465",
+            std::env::var("TEST_HOST").unwrap_or("127.0.0.1".to_string())
+        ),
+        lettre::ClientSecurity::Wrapper(lettre::ClientTlsParameters {
+            connector: native_tls(),
+            domain: "smpt.example.com".to_string(),
+        }),
+    )
+    .unwrap()
+    .credentials(creds)
+    .transport()
+}
 
-// #[test]
-// fn login() {
-//     session("readonly-test@localhost");
-// }
+#[ignore]
+#[test]
+fn connect_insecure_then_secure() {
+    async_std::task::block_on(async {
+        let host = std::env::var("TEST_HOST").unwrap_or("127.0.0.1".to_string());
+        let stream = TcpStream::connect((host.as_ref(), 3143)).await.unwrap();
 
-// #[test]
-// fn logout() {
-//     let mut s = session("readonly-test@localhost");
-//     s.logout().unwrap();
-// }
+        // ignored because of https://github.com/greenmail-mail-test/greenmail/issues/135
+        async_imap::Client::new(stream)
+            .secure("imap.example.com", &tls())
+            .await
+            .unwrap();
+    });
+}
 
-// #[test]
-// fn inbox_zero() {
-//     // https://github.com/greenmail-mail-test/greenmail/issues/265
-//     let mut s = session("readonly-test@localhost");
-//     s.select("INBOX").unwrap();
-//     let inbox = s.search("ALL").unwrap();
-//     assert_eq!(inbox.len(), 0);
-// }
+#[test]
+fn connect_secure() {
+    async_std::task::block_on(async {
+        async_imap::connect(
+            &format!(
+                "{}:3993",
+                std::env::var("TEST_HOST").unwrap_or("127.0.0.1".to_string())
+            ),
+            "imap.example.com",
+            &tls(),
+        )
+        .await
+        .unwrap();
+    });
+}
 
-// #[test]
-// fn inbox() {
-//     let to = "inbox@localhost";
+#[test]
+fn login() {
+    async_std::task::block_on(async {
+        session("readonly-test@localhost").await;
+    });
+}
 
-//     // first log in so we'll see the unsolicited e-mails
-//     let mut c = session(to);
-//     c.select("INBOX").unwrap();
+#[test]
+fn logout() {
+    async_std::task::block_on(async {
+        let mut s = session("readonly-test@localhost").await;
+        s.logout().await.unwrap();
+    });
+}
 
-//     // then send the e-mail
-//     let mut s = smtp(to);
-//     let e = lettre_email::Email::builder()
-//         .from("sender@localhost")
-//         .to(to)
-//         .subject("My first e-mail")
-//         .text("Hello world from SMTP")
-//         .build()
-//         .unwrap();
-//     s.send(e.into()).unwrap();
+#[test]
+fn inbox_zero() {
+    async_std::task::block_on(async {
+        // https://github.com/greenmail-mail-test/greenmail/issues/265
+        let mut s = session("readonly-test@localhost").await;
+        s.select("INBOX").await.unwrap();
+        let inbox = s.search("ALL").await.unwrap();
+        assert_eq!(inbox.len(), 0);
+    });
+}
 
-//     // now we should see the e-mail!
-//     let inbox = c.search("ALL").unwrap();
-//     // and the one message should have the first message sequence number
-//     assert_eq!(inbox.len(), 1);
-//     assert!(inbox.contains(&1));
+#[test]
+fn inbox() {
+    async_std::task::block_on(async {
+        let to = "inbox@localhost";
 
-//     // we should also get two unsolicited responses: Exists and Recent
-//     c.noop().unwrap();
-//     let mut unsolicited = Vec::new();
-//     while let Ok(m) = c.unsolicited_responses.try_recv() {
-//         unsolicited.push(m);
-//     }
-//     assert_eq!(unsolicited.len(), 2);
-//     assert!(unsolicited
-//         .iter()
-//         .any(|m| m == &imap::types::UnsolicitedResponse::Exists(1)));
-//     assert!(unsolicited
-//         .iter()
-//         .any(|m| m == &imap::types::UnsolicitedResponse::Recent(1)));
+        // first log in so we'll see the unsolicited e-mails
+        let mut c = session(to).await;
+        c.select("INBOX").await.unwrap();
 
-//     // let's see that we can also fetch the e-mail
-//     let fetch = c.fetch("1", "(ALL UID)").unwrap();
-//     assert_eq!(fetch.len(), 1);
-//     let fetch = &fetch[0];
-//     assert_eq!(fetch.message, 1);
-//     assert_ne!(fetch.uid, None);
-//     assert_eq!(fetch.size, Some(138));
-//     let e = fetch.envelope().unwrap();
-//     assert_eq!(e.subject, Some("My first e-mail"));
-//     assert_ne!(e.from, None);
-//     assert_eq!(e.from.as_ref().unwrap().len(), 1);
-//     let from = &e.from.as_ref().unwrap()[0];
-//     assert_eq!(from.mailbox, Some("sender"));
-//     assert_eq!(from.host, Some("localhost"));
-//     assert_ne!(e.to, None);
-//     assert_eq!(e.to.as_ref().unwrap().len(), 1);
-//     let to = &e.to.as_ref().unwrap()[0];
-//     assert_eq!(to.mailbox, Some("inbox"));
-//     assert_eq!(to.host, Some("localhost"));
-//     let date_opt = fetch.internal_date();
-//     assert!(date_opt.is_some());
+        println!("sending");
+        // then send the e-mail
+        let mut s = smtp(to);
+        let e = lettre_email::Email::builder()
+            .from("sender@localhost")
+            .to(to)
+            .subject("My first e-mail")
+            .text("Hello world from SMTP")
+            .build()
+            .unwrap();
+        s.send(e.into()).unwrap();
 
-//     // and let's delete it to clean up
-//     c.store("1", "+FLAGS (\\Deleted)").unwrap();
-//     c.expunge().unwrap();
+        println!("searching");
 
-//     // the e-mail should be gone now
-//     let inbox = c.search("ALL").unwrap();
-//     assert_eq!(inbox.len(), 0);
-// }
+        // now we should see the e-mail!
+        let inbox = c.search("ALL").await.unwrap();
+        // and the one message should have the first message sequence number
+        assert_eq!(inbox.len(), 1);
+        assert!(inbox.contains(&1));
 
-// #[test]
-// fn inbox_uid() {
-//     let to = "inbox-uid@localhost";
+        // we should also get two unsolicited responses: Exists and Recent
+        c.noop().await.unwrap();
+        println!("noop done");
+        let mut unsolicited = Vec::new();
+        while !c.unsolicited_responses.is_empty() {
+            unsolicited.push(c.unsolicited_responses.recv().await.unwrap());
+        }
 
-//     // first log in so we'll see the unsolicited e-mails
-//     let mut c = session(to);
-//     c.select("INBOX").unwrap();
+        assert_eq!(unsolicited.len(), 2);
+        assert!(unsolicited
+            .iter()
+            .any(|m| m == &async_imap::types::UnsolicitedResponse::Exists(1)));
+        assert!(unsolicited
+            .iter()
+            .any(|m| m == &async_imap::types::UnsolicitedResponse::Recent(1)));
 
-//     // then send the e-mail
-//     let mut s = smtp(to);
-//     let e = lettre_email::Email::builder()
-//         .from("sender@localhost")
-//         .to(to)
-//         .subject("My first e-mail")
-//         .text("Hello world from SMTP")
-//         .build()
-//         .unwrap();
-//     s.send(e.into()).unwrap();
+        println!("fetching");
 
-//     // now we should see the e-mail!
-//     let inbox = c.uid_search("ALL").unwrap();
-//     // and the one message should have the first message sequence number
-//     assert_eq!(inbox.len(), 1);
-//     let uid = inbox.into_iter().next().unwrap();
+        // let's see that we can also fetch the e-mail
+        let fetch: Vec<_> = c
+            .fetch("1", "(ALL UID)")
+            .await
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .await
+            .unwrap();
+        assert_eq!(fetch.len(), 1);
+        let fetch = &fetch[0];
+        assert_eq!(fetch.message, 1);
+        assert_ne!(fetch.uid, None);
+        assert_eq!(fetch.size, Some(138));
+        let e = fetch.envelope().unwrap();
+        assert_eq!(e.subject, Some("My first e-mail"));
+        assert_ne!(e.from, None);
+        assert_eq!(e.from.as_ref().unwrap().len(), 1);
+        let from = &e.from.as_ref().unwrap()[0];
+        assert_eq!(from.mailbox, Some("sender"));
+        assert_eq!(from.host, Some("localhost"));
+        assert_ne!(e.to, None);
+        assert_eq!(e.to.as_ref().unwrap().len(), 1);
+        let to = &e.to.as_ref().unwrap()[0];
+        assert_eq!(to.mailbox, Some("inbox"));
+        assert_eq!(to.host, Some("localhost"));
+        let date_opt = fetch.internal_date();
+        assert!(date_opt.is_some());
 
-//     // we should also get two unsolicited responses: Exists and Recent
-//     c.noop().unwrap();
-//     let mut unsolicited = Vec::new();
-//     while let Ok(m) = c.unsolicited_responses.try_recv() {
-//         unsolicited.push(m);
-//     }
-//     assert_eq!(unsolicited.len(), 2);
-//     assert!(unsolicited
-//         .iter()
-//         .any(|m| m == &imap::types::UnsolicitedResponse::Exists(1)));
-//     assert!(unsolicited
-//         .iter()
-//         .any(|m| m == &imap::types::UnsolicitedResponse::Recent(1)));
+        // and let's delete it to clean up
+        c.store("1", "+FLAGS (\\Deleted)")
+            .await
+            .unwrap()
+            .collect::<Vec<_>>()
+            .await;
+        c.expunge().await.unwrap().collect::<Vec<_>>().await;
 
-//     // let's see that we can also fetch the e-mail
-//     let fetch = c.uid_fetch(format!("{}", uid), "(ALL UID)").unwrap();
-//     assert_eq!(fetch.len(), 1);
-//     let fetch = &fetch[0];
-//     assert_eq!(fetch.uid, Some(uid));
-//     let e = fetch.envelope().unwrap();
-//     assert_eq!(e.subject, Some("My first e-mail"));
-//     let date_opt = fetch.internal_date();
-//     assert!(date_opt.is_some());
+        // the e-mail should be gone now
+        let inbox = c.search("ALL").await.unwrap();
+        assert_eq!(inbox.len(), 0);
+    });
+}
 
-//     // and let's delete it to clean up
-//     c.uid_store(format!("{}", uid), "+FLAGS (\\Deleted)")
-//         .unwrap();
-//     c.expunge().unwrap();
+#[test]
+fn inbox_uid() {
+    async_std::task::block_on(async {
+        let to = "inbox-uid@localhost";
 
-//     // the e-mail should be gone now
-//     let inbox = c.search("ALL").unwrap();
-//     assert_eq!(inbox.len(), 0);
-// }
+        // first log in so we'll see the unsolicited e-mails
+        let mut c = session(to).await;
+        c.select("INBOX").await.unwrap();
 
-// #[test]
-// #[ignore]
-// fn list() {
-//     let mut s = session("readonly-test@localhost");
-//     s.select("INBOX").unwrap();
-//     let subdirs = s.list(None, Some("%")).unwrap();
-//     assert_eq!(subdirs.len(), 0);
+        // then send the e-mail
+        let mut s = smtp(to);
+        let e = lettre_email::Email::builder()
+            .from("sender@localhost")
+            .to(to)
+            .subject("My first e-mail")
+            .text("Hello world from SMTP")
+            .build()
+            .unwrap();
+        s.send(e.into()).unwrap();
 
-//     // TODO: make a subdir
-// }
+        // now we should see the e-mail!
+        let inbox = c.uid_search("ALL").await.unwrap();
+        // and the one message should have the first message sequence number
+        assert_eq!(inbox.len(), 1);
+        let uid = inbox.into_iter().next().unwrap();
 
-fn main() {}
+        // we should also get two unsolicited responses: Exists and Recent
+        c.noop().await.unwrap();
+        let mut unsolicited = Vec::new();
+        while !c.unsolicited_responses.is_empty() {
+            unsolicited.push(c.unsolicited_responses.recv().await.unwrap());
+        }
+
+        assert_eq!(unsolicited.len(), 2);
+        assert!(unsolicited
+            .iter()
+            .any(|m| m == &async_imap::types::UnsolicitedResponse::Exists(1)));
+        assert!(unsolicited
+            .iter()
+            .any(|m| m == &async_imap::types::UnsolicitedResponse::Recent(1)));
+
+        // let's see that we can also fetch the e-mail
+        let fetch: Vec<_> = c
+            .uid_fetch(format!("{}", uid), "(ALL UID)")
+            .await
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .await
+            .unwrap();
+        assert_eq!(fetch.len(), 1);
+        let fetch = &fetch[0];
+        assert_eq!(fetch.uid, Some(uid));
+        let e = fetch.envelope().unwrap();
+        assert_eq!(e.subject, Some("My first e-mail"));
+        let date_opt = fetch.internal_date();
+        assert!(date_opt.is_some());
+
+        // and let's delete it to clean up
+        c.uid_store(format!("{}", uid), "+FLAGS (\\Deleted)")
+            .await
+            .unwrap()
+            .collect::<Vec<_>>()
+            .await;
+        c.expunge().await.unwrap().collect::<Vec<_>>().await;
+
+        // the e-mail should be gone now
+        let inbox = c.search("ALL").await.unwrap();
+        assert_eq!(inbox.len(), 0);
+    });
+}
+
+#[test]
+#[ignore]
+fn list() {
+    async_std::task::block_on(async {
+        let mut s = session("readonly-test@localhost").await;
+        s.select("INBOX").await.unwrap();
+        let subdirs: Vec<_> = s.list(None, Some("%")).await.unwrap().collect().await;
+        assert_eq!(subdirs.len(), 0);
+
+        // TODO: make a subdir
+    });
+}

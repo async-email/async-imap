@@ -9,6 +9,7 @@ use futures_codec::{Decoder, Encoder};
 use imap_proto::{RequestId, Response};
 use nom::Needed;
 
+#[derive(Debug)]
 pub struct ImapCodec {
     decode_need_message_bytes: usize,
 }

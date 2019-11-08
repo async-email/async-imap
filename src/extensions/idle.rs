@@ -1,13 +1,12 @@
-//! Adds support for the IMAP IDLE command specificed in [RFC
-//! 2177](https://tools.ietf.org/html/rfc2177).
+//! Adds support for the IMAP IDLE command specificed in [RFC2177](https://tools.ietf.org/html/rfc2177).
 
-use std::pin::Pin;
-
-use async_std::io;
+use async_std::io::{self, Read, Write};
 use async_std::prelude::*;
 use async_std::stream::Stream;
 use futures::task::{Context, Poll};
 use imap_proto::{RequestId, Response};
+use std::fmt;
+use std::pin::Pin;
 
 use crate::client::Session;
 use crate::codec::{Request, ResponseData};
@@ -29,21 +28,14 @@ use crate::error::Result;
 ///
 /// As long as a [`Handle`] is active, the mailbox cannot be otherwise accessed.
 #[derive(Debug)]
-pub struct Handle<
-    T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> + Unpin,
-> {
+pub struct Handle<T: Read + Write + Unpin + fmt::Debug> {
     session: Session<T>,
     id: Option<RequestId>,
 }
 
-impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> + Unpin> Unpin
-    for Handle<T>
-{
-}
+impl<T: Read + Write + Unpin + fmt::Debug> Unpin for Handle<T> {}
 
-impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> + Unpin> Stream
-    for Handle<T>
-{
+impl<T: Read + Write + Unpin + fmt::Debug> Stream for Handle<T> {
     type Item = ResponseData;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -57,7 +49,7 @@ pub struct IdleStream<'a, St> {
     stream: &'a mut St,
 }
 
-impl<St: Stream + Unpin> Unpin for IdleStream<'_, St> {}
+impl<St: Unpin> Unpin for IdleStream<'_, St> {}
 
 impl<'a, St: Stream + Unpin> IdleStream<'a, St> {
     unsafe_pinned!(stream: &'a mut St);
@@ -81,7 +73,7 @@ impl<St: Stream + Unpin> Stream for IdleStream<'_, St> {
     }
 }
 
-impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> + Unpin> Handle<T> {
+impl<T: Read + Write + Unpin + fmt::Debug> Handle<T> {
     unsafe_pinned!(session: Session<T>);
 
     pub fn new(session: Session<T>) -> Handle<T> {
