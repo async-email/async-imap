@@ -1250,12 +1250,14 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
         Ok(id)
     }
 
+    /// Runs an arbitrary command, without adding a tag to it.
     pub async fn run_command_untagged<S: AsRef<str>>(&mut self, command: S) -> Result<()> {
         self.conn.run_command_untagged(command.as_ref()).await?;
 
         Ok(())
     }
 
+    /// Read the next response on the connection.
     pub async fn read_response(&mut self) -> Option<ResponseData> {
         let res = self.conn.read_response().await;
         res
