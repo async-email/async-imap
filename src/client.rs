@@ -10,7 +10,7 @@ use async_std::sync;
 use async_tls::{client::TlsStream, TlsConnector};
 use futures::SinkExt;
 use futures_codec::Framed;
-use imap_proto::Response;
+use imap_proto::{RequestId, Response};
 
 use super::authenticator::Authenticator;
 use super::error::{Error, Result, ValidateError};
@@ -406,10 +406,15 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
     /// `unsolicited_responses` channel of the [`Session`](struct.Session.html).
     pub async fn select<S: AsRef<str>>(&mut self, mailbox_name: S) -> Result<Mailbox> {
         // TODO: also note READ/WRITE vs READ-only mode!
-        self.run_command(&format!("SELECT {}", validate_str(mailbox_name.as_ref())?))
+        let id = self
+            .run_command(&format!("SELECT {}", validate_str(mailbox_name.as_ref())?))
             .await?;
-        let mbox =
-            parse_mailbox(&mut self.conn.stream, self.unsolicited_responses_tx.clone()).await?;
+        let mbox = parse_mailbox(
+            &mut self.conn.stream,
+            self.unsolicited_responses_tx.clone(),
+            id,
+        )
+        .await?;
 
         Ok(mbox)
     }
@@ -419,10 +424,15 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
     /// of the mailbox, including per-user state, will happen in a mailbox opened with `examine`;
     /// in particular, messagess cannot lose [`Flag::Recent`] in an examined mailbox.
     pub async fn examine<S: AsRef<str>>(&mut self, mailbox_name: S) -> Result<Mailbox> {
-        self.run_command(&format!("EXAMINE {}", validate_str(mailbox_name.as_ref())?))
+        let id = self
+            .run_command(&format!("EXAMINE {}", validate_str(mailbox_name.as_ref())?))
             .await?;
-        let mbox =
-            parse_mailbox(&mut self.conn.stream, self.unsolicited_responses_tx.clone()).await?;
+        let mbox = parse_mailbox(
+            &mut self.conn.stream,
+            self.unsolicited_responses_tx.clone(),
+            id,
+        )
+        .await?;
 
         Ok(mbox)
     }
@@ -494,13 +504,18 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
         S1: AsRef<str>,
         S2: AsRef<str>,
     {
-        self.run_command(&format!(
-            "FETCH {} {}",
-            sequence_set.as_ref(),
-            query.as_ref()
-        ))
-        .await?;
-        let res = parse_fetches(&mut self.conn.stream, self.unsolicited_responses_tx.clone());
+        let id = self
+            .run_command(&format!(
+                "FETCH {} {}",
+                sequence_set.as_ref(),
+                query.as_ref()
+            ))
+            .await?;
+        let res = parse_fetches(
+            &mut self.conn.stream,
+            self.unsolicited_responses_tx.clone(),
+            id,
+        );
 
         Ok(res)
     }
@@ -516,13 +531,18 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
         S1: AsRef<str>,
         S2: AsRef<str>,
     {
-        self.run_command(&format!(
-            "UID FETCH {} {}",
-            uid_set.as_ref(),
-            query.as_ref()
-        ))
-        .await?;
-        let res = parse_fetches(&mut self.conn.stream, self.unsolicited_responses_tx.clone());
+        let id = self
+            .run_command(&format!(
+                "UID FETCH {} {}",
+                uid_set.as_ref(),
+                query.as_ref()
+            ))
+            .await?;
+        let res = parse_fetches(
+            &mut self.conn.stream,
+            self.unsolicited_responses_tx.clone(),
+            id,
+        );
         Ok(res)
     }
 
@@ -793,13 +813,18 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
         S1: AsRef<str>,
         S2: AsRef<str>,
     {
-        self.run_command(&format!(
-            "STORE {} {}",
-            sequence_set.as_ref(),
-            query.as_ref()
-        ))
-        .await?;
-        let res = parse_fetches(&mut self.conn.stream, self.unsolicited_responses_tx.clone());
+        let id = self
+            .run_command(&format!(
+                "STORE {} {}",
+                sequence_set.as_ref(),
+                query.as_ref()
+            ))
+            .await?;
+        let res = parse_fetches(
+            &mut self.conn.stream,
+            self.unsolicited_responses_tx.clone(),
+            id,
+        );
         Ok(res)
     }
 
@@ -814,13 +839,18 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
         S1: AsRef<str>,
         S2: AsRef<str>,
     {
-        self.run_command(&format!(
-            "UID STORE {} {}",
-            uid_set.as_ref(),
-            query.as_ref()
-        ))
-        .await?;
-        let res = parse_fetches(&mut self.conn.stream, self.unsolicited_responses_tx.clone());
+        let id = self
+            .run_command(&format!(
+                "UID STORE {} {}",
+                uid_set.as_ref(),
+                query.as_ref()
+            ))
+            .await?;
+        let res = parse_fetches(
+            &mut self.conn.stream,
+            self.unsolicited_responses_tx.clone(),
+            id,
+        );
         Ok(res)
     }
 
@@ -1046,14 +1076,19 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
         mailbox_name: S1,
         data_items: S2,
     ) -> Result<Mailbox> {
-        self.run_command(&format!(
-            "STATUS {} {}",
-            validate_str(mailbox_name.as_ref())?,
-            data_items.as_ref()
-        ))
+        let id = self
+            .run_command(&format!(
+                "STATUS {} {}",
+                validate_str(mailbox_name.as_ref())?,
+                data_items.as_ref()
+            ))
+            .await?;
+        let mbox = parse_mailbox(
+            &mut self.conn.stream,
+            self.unsolicited_responses_tx.clone(),
+            id,
+        )
         .await?;
-        let mbox =
-            parse_mailbox(&mut self.conn.stream, self.unsolicited_responses_tx.clone()).await?;
         Ok(mbox)
     }
 
@@ -1196,10 +1231,10 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
     }
 
     /// Runs any command passed to it.
-    pub async fn run_command<S: AsRef<str>>(&mut self, untagged_command: S) -> Result<()> {
-        self.conn.run_command(untagged_command.as_ref()).await?;
+    pub async fn run_command<S: AsRef<str>>(&mut self, untagged_command: S) -> Result<RequestId> {
+        let id = self.conn.run_command(untagged_command.as_ref()).await?;
 
-        Ok(())
+        Ok(id)
     }
 
     pub async fn run_command_untagged<S: AsRef<str>>(&mut self, untagged_command: S) -> Result<()> {
@@ -1232,17 +1267,16 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
         Ok(())
     }
 
-    pub(crate) async fn run_command(&mut self, untagged_command: &str) -> Result<()> {
+    pub(crate) async fn run_command(&mut self, untagged_command: &str) -> Result<RequestId> {
         let request_id = self.request_ids.next().unwrap(); // safe: never returns Err
         self.stream
             .send(Request(
-                Some(request_id),
+                Some(request_id.clone()),
                 untagged_command.as_bytes().into(),
             ))
             .await?;
         self.stream.flush().await?;
-
-        Ok(())
+        Ok(request_id)
     }
 
     pub(crate) async fn run_command_and_check_ok(&mut self, untagged_command: &str) -> Result<()> {

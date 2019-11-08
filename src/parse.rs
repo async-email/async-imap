@@ -1,4 +1,4 @@
-use imap_proto::{self, MailboxDatum, Response};
+use imap_proto::{self, MailboxDatum, RequestId, Response};
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashSet;
@@ -72,12 +72,13 @@ pub fn parse_names<'a, T: Stream<Item = ResponseData> + Unpin>(
 pub fn parse_fetches<'a, T: Stream<Item = ResponseData> + Unpin>(
     stream: &'a mut T,
     unsolicited: sync::Sender<UnsolicitedResponse>,
+    command_tag: RequestId,
 ) -> impl Stream<Item = Result<Fetch<'a>>> + 'a {
     use futures::StreamExt;
 
     StreamExt::filter_map(
-        StreamExt::take_while(stream, |res| match res.parsed() {
-            Response::Done { .. } => futures::future::ready(false),
+        StreamExt::take_while(stream, move |res| match res.parsed() {
+            Response::Done { tag, .. } => futures::future::ready(tag != &command_tag),
             _ => futures::future::ready(true),
         }),
         move |resp| {
@@ -210,17 +211,22 @@ pub async fn parse_noop<T: Stream<Item = ResponseData> + Unpin>(
 pub async fn parse_mailbox<T: Stream<Item = ResponseData> + Unpin>(
     stream: &mut T,
     unsolicited: sync::Sender<UnsolicitedResponse>,
+    command_tag: RequestId,
 ) -> Result<Mailbox> {
     let mut mailbox = Mailbox::default();
 
     while let Some(resp) = stream
         .take_while(|res| match res.parsed() {
-            Response::Done { .. } => false,
+            Response::Done { tag, .. } => {
+                println!("done {:?} {:?} {}", tag, &command_tag, tag != &command_tag);
+                tag != &command_tag
+            }
             _ => true,
         })
         .next()
         .await
     {
+        println!("mailbox parsing {:?}", resp.parsed());
         match resp.parsed() {
             Response::Data { status, code, .. } => {
                 if let imap_proto::Status::Ok = status {
@@ -279,6 +285,7 @@ pub async fn parse_mailbox<T: Stream<Item = ResponseData> + Unpin>(
         }
     }
 
+    println!("done mailbox parsing");
     Ok(mailbox)
 }
 
@@ -449,8 +456,9 @@ mod tests {
             let (send, recv) = sync::channel(10);
             let responses = input_stream(&vec![]);
             let mut stream = async_std::stream::from_iter(responses);
+            let id = RequestId("a".into());
 
-            let fetches = parse_fetches(&mut stream, send)
+            let fetches = parse_fetches(&mut stream, send, id)
                 .collect::<Result<Vec<_>>>()
                 .await
                 .unwrap();
@@ -468,8 +476,9 @@ mod tests {
                 "* 25 FETCH (FLAGS (\\Seen))\r\n",
             ]);
             let mut stream = async_std::stream::from_iter(responses);
+            let id = RequestId("a".into());
 
-            let fetches = parse_fetches(&mut stream, send)
+            let fetches = parse_fetches(&mut stream, send, id)
                 .collect::<Result<Vec<_>>>()
                 .await
                 .unwrap();
@@ -496,8 +505,9 @@ mod tests {
             let (send, recv) = sync::channel(10);
             let responses = input_stream(&vec!["* 37 FETCH (UID 74)\r\n", "* 1 RECENT\r\n"]);
             let mut stream = async_std::stream::from_iter(responses);
+            let id = RequestId("a".into());
 
-            let fetches = parse_fetches(&mut stream, send)
+            let fetches = parse_fetches(&mut stream, send, id)
                 .collect::<Result<Vec<_>>>()
                 .await
                 .unwrap();

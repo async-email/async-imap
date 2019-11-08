@@ -1,5 +1,5 @@
 [package]
-name = "imap"
+name = "async-imap"
 version = "1.0.0"
 authors = ["dignifiedquire <me@dignifiedquire.com>",
            "Matt McCoy <mattnenterprise@yahoo.com>",

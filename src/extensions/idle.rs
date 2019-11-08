@@ -93,12 +93,16 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
 
     pub async fn init(&mut self) -> Result<()> {
         self.session.run_command("IDLE").await?;
-        let res = self.session.stream.next().await.unwrap();
-        match res.parsed() {
-            v @ Response::Continue { .. } => {
-                return Ok(());
+        while let Some(res) = self.session.stream.next().await {
+            match res.parsed() {
+                Response::Continue { .. } => {
+                    return Ok(());
+                }
+                v => {
+                    // TODO: send through unhandled responses
+                    println!("unexpected response {:?}", v);
+                }
             }
-            _ => {}
         }
 
         Err(io::Error::new(io::ErrorKind::ConnectionRefused, "").into())
