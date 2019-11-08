@@ -58,7 +58,3 @@ required-features = ["default"]
 [[test]]
 name = "imap_integration"
 required-features = ["default"]
-
-
-[patch.'https://github.com/async-rs/async-std']
-async-std = { path = "../async-std" }

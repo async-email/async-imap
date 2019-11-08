@@ -1545,7 +1545,12 @@ mod tests {
             .to_vec();
         let mock_stream = MockStream::new(response);
         let mut session = mock_session!(mock_stream);
-        session.uid_expunge("2:4").await.unwrap();
+        session
+            .uid_expunge("2:4")
+            .await
+            .unwrap()
+            .collect::<Vec<_>>()
+            .await;
         assert!(
             session.stream.stream.written_buf == b"A0001 UID EXPUNGE 2:4\r\n".to_vec(),
             "Invalid expunge command"
