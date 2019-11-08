@@ -2,16 +2,33 @@ use super::{Flag, Seq, Uid};
 use chrono::{DateTime, FixedOffset};
 use imap_proto::types::{AttributeValue, BodyStructure, Envelope, MessageSection, SectionPath};
 
+use crate::codec::ResponseData;
+
 /// Format of Date and Time as defined RFC3501.
 /// See `date-time` element in [Formal Syntax](https://tools.ietf.org/html/rfc3501#section-9)
 /// chapter of this RFC.
 const DATE_TIME_FORMAT: &str = "%d-%b-%Y %H:%M:%S %z";
 
+rental! {
+    pub mod rents {
+        use super::*;
+        use crate::codec::ResponseData;
+
+        #[rental(debug, covariant)]
+        pub struct InnerFetch {
+            data: Vec<u8>,
+            attrs: Vec<AttributeValue<'data>>,
+        }
+    }
+}
+
+pub use rents::InnerFetch;
+
 /// An IMAP [`FETCH` response](https://tools.ietf.org/html/rfc3501#section-7.4.2) that contains
 /// data about a particular message. This response occurs as the result of a `FETCH` or `STORE`
 /// command, as well as by unilateral server decision (e.g., flag updates).
-#[derive(Debug, Eq, PartialEq)]
-pub struct Fetch<'a> {
+pub struct Fetch {
+    inner: InnerFetch,
     /// The ordinal number of this message in its containing mailbox.
     pub message: Seq,
 
@@ -23,24 +40,53 @@ pub struct Fetch<'a> {
     /// A number expressing the [RFC-2822](https://tools.ietf.org/html/rfc2822) size of the message.
     /// Only present if `RFC822.SIZE` was specified in the query argument to `FETCH`.
     pub size: Option<u32>,
-
-    // Note that none of these fields are *actually* 'static. Rather, they are tied to the lifetime
-    // of the `ZeroCopy` that contains this `Name`. That's also why they can't be public -- we can
-    // only return them with a lifetime tied to self.
-    pub(crate) fetch: Vec<AttributeValue<'a>>,
-    pub(crate) flags: Vec<Flag<'a>>,
 }
 
-impl<'a> Fetch<'a> {
+impl Fetch {
+    pub(crate) fn new(resp: ResponseData) -> Self {
+        assert!(resp.parsed().is_fetch());
+        let ResponseData { raw, response } = resp;
+
+        let (message, attrs) = response.into_inner_fetch();
+        let mut uid = None;
+        let mut size = None;
+
+        let inner = InnerFetch::new(raw, |_data| attrs);
+        for attr in inner.suffix() {
+            match attr {
+                AttributeValue::Uid(id) => uid = Some(*id),
+                AttributeValue::Rfc822Size(sz) => size = Some(*sz),
+                _ => {}
+            }
+        }
+
+        Fetch {
+            message,
+            uid,
+            size,
+            inner,
+        }
+    }
+
     /// A list of flags that are set for this message.
-    pub fn flags(&self) -> &[Flag<'_>] {
-        &self.flags[..]
+    pub fn flags(&self) -> impl Iterator<Item = Flag<'_>> {
+        self.inner
+            .suffix()
+            .iter()
+            .filter_map(|attr| match attr {
+                AttributeValue::Flags(raw_flags) => {
+                    Some(raw_flags.into_iter().map(|s| Flag::from(*s)))
+                }
+                _ => None,
+            })
+            .flatten()
     }
 
     /// The bytes that make up the header of this message, if `BODY[HEADER]`, `BODY.PEEK[HEADER]`,
     /// or `RFC822.HEADER` was included in the `query` argument to `FETCH`.
     pub fn header(&self) -> Option<&[u8]> {
-        self.fetch
+        self.inner
+            .suffix()
             .iter()
             .filter_map(|av| match av {
                 AttributeValue::BodySection {
@@ -58,7 +104,8 @@ impl<'a> Fetch<'a> {
     /// `query` argument to `FETCH`. The bytes SHOULD be interpreted by the client according to the
     /// content transfer encoding, body type, and subtype.
     pub fn body(&self) -> Option<&[u8]> {
-        self.fetch
+        self.inner
+            .suffix()
             .iter()
             .filter_map(|av| match av {
                 AttributeValue::BodySection {
@@ -77,7 +124,8 @@ impl<'a> Fetch<'a> {
     /// interpreted by the client according to the content transfer encoding, body type, and
     /// subtype.
     pub fn text(&self) -> Option<&[u8]> {
-        self.fetch
+        self.inner
+            .suffix()
             .iter()
             .filter_map(|av| match av {
                 AttributeValue::BodySection {
@@ -99,7 +147,8 @@ impl<'a> Fetch<'a> {
     /// The full description of the format of the envelope is given in [RFC 3501 section
     /// 7.4.2](https://tools.ietf.org/html/rfc3501#section-7.4.2).
     pub fn envelope(&self) -> Option<&Envelope<'_>> {
-        self.fetch
+        self.inner
+            .suffix()
             .iter()
             .filter_map(|av| match av {
                 AttributeValue::Envelope(env) => Some(&**env),
@@ -113,7 +162,8 @@ impl<'a> Fetch<'a> {
     /// See [section 7.4.2 of RFC 3501](https://tools.ietf.org/html/rfc3501#section-7.4.2) for
     /// details.
     pub fn section(&self, path: &SectionPath) -> Option<&[u8]> {
-        self.fetch
+        self.inner
+            .suffix()
             .iter()
             .filter_map(|av| match av {
                 AttributeValue::BodySection {
@@ -131,7 +181,8 @@ impl<'a> Fetch<'a> {
     /// See [section 2.3.3 of RFC 3501](https://tools.ietf.org/html/rfc3501#section-2.3.3) for
     /// details.
     pub fn internal_date(&self) -> Option<DateTime<FixedOffset>> {
-        self.fetch
+        self.inner
+            .suffix()
             .iter()
             .filter_map(|av| match av {
                 AttributeValue::InternalDate(date_time) => Some(*date_time),
@@ -150,8 +201,9 @@ impl<'a> Fetch<'a> {
     ///
     /// See [section 2.3.6 of RFC 3501](https://tools.ietf.org/html/rfc3501#section-2.3.6) for
     /// details.
-    pub fn bodystructure(&self) -> Option<&BodyStructure<'a>> {
-        self.fetch
+    pub fn bodystructure(&self) -> Option<&BodyStructure<'_>> {
+        self.inner
+            .suffix()
             .iter()
             .filter_map(|av| match av {
                 AttributeValue::BodyStructure(bs) => Some(bs),

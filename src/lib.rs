@@ -79,6 +79,9 @@
 #[macro_use]
 extern crate pin_utils;
 
+#[macro_use]
+extern crate rental;
+
 mod parse;
 
 pub mod types;

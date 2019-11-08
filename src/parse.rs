@@ -55,7 +55,7 @@ pub(crate) fn parse_fetches<'a, T: Stream<Item = ResponseData> + Unpin>(
     stream: &'a mut T,
     unsolicited: sync::Sender<UnsolicitedResponse>,
     command_tag: RequestId,
-) -> impl Stream<Item = Result<Fetch<'a>>> + 'a {
+) -> impl Stream<Item = Result<Fetch>> + 'a {
     use futures::StreamExt;
 
     StreamExt::filter_map(
@@ -68,29 +68,7 @@ pub(crate) fn parse_fetches<'a, T: Stream<Item = ResponseData> + Unpin>(
 
             async move {
                 match resp.parsed() {
-                    Response::Fetch(num, attrs) => {
-                        let mut fetch = Fetch {
-                            message: *num,
-                            flags: vec![],
-                            uid: None,
-                            size: None,
-                            fetch: Vec::new(), // FIXME: attrs.to_vec(),
-                        };
-
-                        // set some common fields eaglery
-                        for attr in &fetch.fetch {
-                            use imap_proto::AttributeValue;
-                            match attr {
-                                AttributeValue::Flags(flags) => {
-                                    fetch.flags.extend(flags.iter().cloned().map(Flag::from));
-                                }
-                                AttributeValue::Uid(uid) => fetch.uid = Some(*uid),
-                                AttributeValue::Rfc822Size(sz) => fetch.size = Some(*sz),
-                                _ => {}
-                            }
-                        }
-                        Some(Ok(fetch))
-                    }
+                    Response::Fetch(..) => Some(Ok(Fetch::new(resp))),
                     _ => match handle_unilateral(&resp, unsolicited).await {
                         Some(resp) => match resp.parsed() {
                             Response::Fetch(..) => None,
@@ -260,6 +238,7 @@ pub(crate) async fn parse_mailbox<T: Stream<Item = ResponseData> + Unpin>(
                         .extend(flags.into_iter().map(|s| (*s).to_string()).map(Flag::from));
                 }
                 MailboxDatum::List { .. } => {}
+                _ => {}
             },
             Response::Expunge(n) => {
                 unsolicited.send(UnsolicitedResponse::Expunge(*n)).await;
@@ -466,12 +445,12 @@ mod tests {
 
         assert_eq!(fetches.len(), 2);
         assert_eq!(fetches[0].message, 24);
-        assert_eq!(fetches[0].flags(), &[Flag::Seen]);
+        assert_eq!(fetches[0].flags().collect::<Vec<_>>(), vec![Flag::Seen]);
         assert_eq!(fetches[0].uid, Some(4827943));
         assert_eq!(fetches[0].body(), None);
         assert_eq!(fetches[0].header(), None);
         assert_eq!(fetches[1].message, 25);
-        assert_eq!(fetches[1].flags(), &[Flag::Seen]);
+        assert_eq!(fetches[1].flags().collect::<Vec<_>>(), vec![Flag::Seen]);
         assert_eq!(fetches[1].uid, None);
         assert_eq!(fetches[1].body(), None);
         assert_eq!(fetches[1].header(), None);

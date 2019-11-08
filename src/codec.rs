@@ -1,8 +1,9 @@
+use std::ops::Deref;
 use std::pin::Pin;
 
 use async_std::io;
 use async_std::stream::Stream;
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{BufMut, BytesMut};
 use futures::task::{Context, Poll};
 use futures_codec::{Decoder, Encoder};
 use imap_proto::{RequestId, Response};
@@ -52,7 +53,7 @@ impl<'a> Decoder for ImapCodec {
             }
         };
 
-        let raw = buf.split_to(rsp_len).freeze();
+        let raw = buf.split_to(rsp_len).freeze().to_vec();
         self.decode_need_message_bytes = 0;
         Ok(Some(ResponseData { raw, response }))
     }
@@ -77,7 +78,7 @@ impl Encoder for ImapCodec {
 // TODO: use rental for this
 #[derive(Debug, PartialEq, Eq)]
 pub struct ResponseData {
-    pub raw: Bytes,
+    pub raw: Vec<u8>,
     // This reference is really scoped to the lifetime of the `raw`
     // member, but unfortunately Rust does not allow that yet. It
     // is transmuted to `'static` by the `Decoder`, instead, and
@@ -89,6 +90,14 @@ pub struct ResponseData {
     pub response: Response<'static>,
 }
 
+impl Deref for ResponseData {
+    type Target = Response<'static>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.response
+    }
+}
+
 impl ResponseData {
     pub fn request_id(&self) -> Option<&RequestId> {
         match self.response {
@@ -98,6 +107,10 @@ impl ResponseData {
     }
     pub fn parsed(&self) -> &Response<'_> {
         &self.response
+    }
+
+    pub fn into_inner(self) -> Vec<u8> {
+        self.raw
     }
 }
 

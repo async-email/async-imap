@@ -135,7 +135,7 @@ pub async fn connect<A: ToSocketAddrs, S: AsRef<str>>(
     let ssl_stream = handshake.await?;
 
     let mut stream = Framed::new(ssl_stream, ImapCodec::default());
-    let greeting = stream.next().await.unwrap()?;
+    let _greeting = stream.next().await.unwrap()?;
 
     let conn_stream = ConnStream::new(stream);
 
@@ -471,11 +471,11 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
     ///  - `RFC822.HEADER`: Functionally equivalent to `BODY.PEEK[HEADER]`.
     ///  - `RFC822.SIZE`: The [RFC-2822](https://tools.ietf.org/html/rfc2822) size of the message.
     ///  - `UID`: The unique identifier for the message.
-    pub async fn fetch<S1, S2>(
-        &mut self,
+    pub async fn fetch<'a, S1, S2>(
+        &'a mut self,
         sequence_set: S1,
         query: S2,
-    ) -> Result<impl Stream<Item = Result<Fetch<'_>>>>
+    ) -> Result<impl Stream<Item = Result<Fetch>> + 'a>
     where
         S1: AsRef<str>,
         S2: AsRef<str>,
@@ -498,11 +498,11 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
 
     /// Equivalent to [`Session::fetch`], except that all identifiers in `uid_set` are
     /// [`Uid`]s. See also the [`UID` command](https://tools.ietf.org/html/rfc3501#section-6.4.8).
-    pub async fn uid_fetch<S1, S2>(
-        &mut self,
+    pub async fn uid_fetch<'a, S1, S2>(
+        &'a mut self,
         uid_set: S1,
         query: S2,
-    ) -> Result<impl Stream<Item = Result<Fetch<'_>>>>
+    ) -> Result<impl Stream<Item = Result<Fetch>> + 'a>
     where
         S1: AsRef<str>,
         S2: AsRef<str>,
@@ -798,11 +798,11 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
     ///     Ok(())
     /// }
     /// ```
-    pub async fn store<S1, S2>(
-        &mut self,
+    pub async fn store<'a, S1, S2>(
+        &'a mut self,
         sequence_set: S1,
         query: S2,
-    ) -> Result<impl Stream<Item = Result<Fetch<'_>>>>
+    ) -> Result<impl Stream<Item = Result<Fetch>> + 'a>
     where
         S1: AsRef<str>,
         S2: AsRef<str>,
@@ -824,11 +824,11 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
 
     /// Equivalent to [`Session::store`], except that all identifiers in `sequence_set` are
     /// [`Uid`]s. See also the [`UID` command](https://tools.ietf.org/html/rfc3501#section-6.4.8).
-    pub async fn uid_store<S1, S2>(
-        &mut self,
+    pub async fn uid_store<'a, S1, S2>(
+        &'a mut self,
         uid_set: S1,
         query: S2,
-    ) -> Result<impl Stream<Item = Result<Fetch<'_>>>>
+    ) -> Result<impl Stream<Item = Result<Fetch>> + 'a>
     where
         S1: AsRef<str>,
         S2: AsRef<str>,
@@ -1753,7 +1753,12 @@ mod tests {
     async fn store() {
         generic_store(" ", |c, set, query| {
             async move {
-                c.lock().await.store(set, query).await?;
+                c.lock()
+                    .await
+                    .store(set, query)
+                    .await?
+                    .collect::<Vec<_>>()
+                    .await;
                 Ok(())
             }
         })
@@ -1764,7 +1769,12 @@ mod tests {
     async fn uid_store() {
         generic_store(" UID ", |c, set, query| {
             async move {
-                c.lock().await.uid_store(set, query).await?;
+                c.lock()
+                    .await
+                    .uid_store(set, query)
+                    .await?
+                    .collect::<Vec<_>>()
+                    .await;
                 Ok(())
             }
         })
@@ -1872,7 +1882,13 @@ mod tests {
     async fn fetch() {
         generic_fetch(" ", |c, seq, query| {
             async move {
-                c.lock().await.fetch(seq, query).await?;
+                c.lock()
+                    .await
+                    .fetch(seq, query)
+                    .await?
+                    .collect::<Vec<_>>()
+                    .await;
+
                 Ok(())
             }
         })
@@ -1883,7 +1899,12 @@ mod tests {
     async fn uid_fetch() {
         generic_fetch(" UID ", |c, seq, query| {
             async move {
-                c.lock().await.uid_fetch(seq, query).await?;
+                c.lock()
+                    .await
+                    .uid_fetch(seq, query)
+                    .await?
+                    .collect::<Vec<_>>()
+                    .await;
                 Ok(())
             }
         })
