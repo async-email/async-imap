@@ -13,7 +13,7 @@ use futures_codec::Framed;
 use imap_proto::{RequestId, Response};
 
 use super::authenticator::Authenticator;
-use super::error::{Error, Result, ValidateError};
+use super::error::{Error, ParseError, Result, ValidateError};
 use super::parse::*;
 use super::types::*;
 use crate::codec::{ConnStream, IdGenerator, ImapCodec, Request, ResponseData};
@@ -314,56 +314,49 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
                 .await,
             self
         );
-        self.do_auth_handshake(authenticator)
+        let session = self.do_auth_handshake(authenticator).await?;
+
+        Ok(session)
     }
 
     /// This func does the handshake process once the authenticate command is made.
-    fn do_auth_handshake<A: Authenticator>(
+    async fn do_auth_handshake<A: Authenticator>(
         mut self,
         authenticator: &A,
     ) -> ::std::result::Result<Session<T>, (Error, Client<T>)> {
-        unimplemented!()
-        // TODO Clean up this code
-        // loop {
-        //     let mut line = Vec::new();
-        //     // explicit match blocks neccessary to convert error to tuple and not bind self too
-        //     // early (see also comment on `login`)
-        //     ok_or_unauth_client_err!(self.readline(&mut line), self);
-
-        //     // Some servers will only send `+\r\n`.
-        //     if line.starts_with(b"+ ") || &line == b"+\r\n" {
-        //         let challenge = if &line == b"+\r\n" {
-        //             Vec::new()
-        //         } else {
-        //             let line_str = ok_or_unauth_client_err!(
-        //                 match str::from_utf8(line.as_slice()) {
-        //                     Ok(line_str) => Ok(line_str),
-        //                     Err(e) => Err(Error::Parse(ParseError::DataNotUtf8(line, e))),
-        //                 },
-        //                 self
-        //             );
-        //             let data =
-        //                 ok_or_unauth_client_err!(parse_authenticate_response(line_str), self);
-        //             ok_or_unauth_client_err!(
-        //                 base64::decode(data).map_err(|e| Error::Parse(ParseError::Authentication(
-        //                     data.to_string(),
-        //                     Some(e)
-        //                 ))),
-        //                 self
-        //             )
-        //         };
-
-        //         let raw_response = &authenticator.process(&challenge);
-        //         let auth_response = base64::encode(raw_response);
-        //         ok_or_unauth_client_err!(
-        //             self.write_line(auth_response.into_bytes().as_slice()),
-        //             self
-        //         );
-        //     } else {
-        //         ok_or_unauth_client_err!(self.read_response_onto(&mut line), self);
-        //         return Ok(Session::new(self.conn));
-        //     }
-        // }
+        // explicit match blocks neccessary to convert error to tuple and not bind self too
+        // early (see also comment on `login`)
+        if let Some(res) = self.read_response().await {
+            // FIXME: Some servers will only send `+\r\n` need to handle that in imap_proto.
+            match res.parsed() {
+                Response::Continue { information, .. } if information.is_some() => {
+                    let text = information.unwrap();
+                    let challenge = ok_or_unauth_client_err!(
+                        base64::decode(text).map_err(|e| Error::Parse(ParseError::Authentication(
+                            text.to_string(),
+                            Some(e)
+                        ))),
+                        self
+                    );
+                    let raw_response = &authenticator.process(&challenge);
+                    let auth_response = base64::encode(raw_response);
+                    ok_or_unauth_client_err!(
+                        self.conn.run_command_untagged(&auth_response).await,
+                        self
+                    );
+                    Ok(Session::new(self.conn))
+                }
+                _ => {
+                    if self.read_response().await.is_some() {
+                        Ok(Session::new(self.conn))
+                    } else {
+                        Err((Error::ConnectionLost, self))
+                    }
+                }
+            }
+        } else {
+            Err((Error::ConnectionLost, self))
+        }
     }
 }
 
@@ -1330,6 +1323,16 @@ mod tests {
         };
     }
 
+    macro_rules! assert_eq_bytes {
+        ($a:expr, $b:expr, $c:expr) => {
+            assert_eq!(
+                std::str::from_utf8($a).unwrap(),
+                std::str::from_utf8($b).unwrap(),
+                $c
+            )
+        };
+    }
+
     #[async_attributes::test]
     async fn fetch_body() {
         let response = "a0 OK Logged in.\r\n\
@@ -1375,43 +1378,49 @@ mod tests {
         client.read_response().await.unwrap();
     }
 
-    // #[test]
-    // fn authenticate() {
-    //     let response = b"+ YmFy\r\n\
-    //                      a1 OK Logged in\r\n"
-    //         .to_vec();
-    //     let command = "a1 AUTHENTICATE PLAIN\r\n\
-    //                    Zm9v\r\n";
-    //     let mock_stream = MockStream::new(response);
-    //     let client = Client::new(mock_stream);
-    //     enum Authenticate {
-    //         Auth,
-    //     };
-    //     impl Authenticator for Authenticate {
-    //         type Response = Vec<u8>;
-    //         fn process(&self, challenge: &[u8]) -> Self::Response {
-    //             assert!(challenge == b"bar", "Invalid authenticate challenge");
-    //             b"foo".to_vec()
-    //         }
-    //     }
-    //     let session = client.authenticate("PLAIN", &Authenticate::Auth).unwrap();
-    //     assert!(
-    //         session.stream.stream.written_buf == command.as_bytes().to_vec(),
-    //         "Invalid authenticate command"
-    //     );
-    // }
+    #[async_attributes::test]
+    async fn authenticate() {
+        let response = b"+ YmFy\r\n\
+                         A0001 OK Logged in\r\n"
+            .to_vec();
+        let command = "A0001 AUTHENTICATE PLAIN\r\n\
+                       Zm9v\r\n";
+        let mock_stream = MockStream::new(response);
+        let client = mock_client!(mock_stream);
+        enum Authenticate {
+            Auth,
+        };
+        impl Authenticator for Authenticate {
+            type Response = Vec<u8>;
+            fn process(&self, challenge: &[u8]) -> Self::Response {
+                assert!(challenge == b"bar", "Invalid authenticate challenge");
+                b"foo".to_vec()
+            }
+        }
+        let session = client
+            .authenticate("PLAIN", &Authenticate::Auth)
+            .await
+            .ok()
+            .unwrap();
+        assert_eq_bytes!(
+            &session.stream.stream.written_buf,
+            command.as_bytes(),
+            "Invalid authenticate command"
+        );
+    }
 
     #[async_attributes::test]
     async fn login() {
-        let response = b"a1 OK Logged in\r\n".to_vec();
+        let response = b"A0001 OK Logged in\r\n".to_vec();
         let username = "username";
         let password = "password";
-        let command = format!("a1 LOGIN {} {}\r\n", quote!(username), quote!(password));
+        let command = format!("A0001 LOGIN {} {}\r\n", quote!(username), quote!(password));
         let mock_stream = MockStream::new(response);
         let client = mock_client!(mock_stream);
         if let Ok(session) = client.login(username, password).await {
-            assert!(
-                session.stream.stream.written_buf == command.as_bytes().to_vec(),
+            assert_eq!(
+                session.stream.stream.written_buf,
+                command.as_bytes().to_vec(),
                 "Invalid login command"
             );
         } else {
@@ -1421,8 +1430,8 @@ mod tests {
 
     #[async_attributes::test]
     async fn logout() {
-        let response = b"a1 OK Logout completed.\r\n".to_vec();
-        let command = format!("a1 LOGOUT\r\n");
+        let response = b"A0001 OK Logout completed.\r\n".to_vec();
+        let command = format!("A0001 LOGOUT\r\n");
         let mock_stream = MockStream::new(response);
         let mut session = mock_session!(mock_stream);
         session.logout().await.unwrap();
@@ -1434,11 +1443,11 @@ mod tests {
 
     #[async_attributes::test]
     async fn rename() {
-        let response = b"a1 OK RENAME completed\r\n".to_vec();
+        let response = b"A0001 OK RENAME completed\r\n".to_vec();
         let current_mailbox_name = "INBOX";
         let new_mailbox_name = "NEWINBOX";
         let command = format!(
-            "a1 RENAME {} {}\r\n",
+            "A0001 RENAME {} {}\r\n",
             quote!(current_mailbox_name),
             quote!(new_mailbox_name)
         );
@@ -1456,9 +1465,9 @@ mod tests {
 
     #[async_attributes::test]
     async fn subscribe() {
-        let response = b"a1 OK SUBSCRIBE completed\r\n".to_vec();
+        let response = b"A0001 OK SUBSCRIBE completed\r\n".to_vec();
         let mailbox = "INBOX";
-        let command = format!("a1 SUBSCRIBE {}\r\n", quote!(mailbox));
+        let command = format!("A0001 SUBSCRIBE {}\r\n", quote!(mailbox));
         let mock_stream = MockStream::new(response);
         let mut session = mock_session!(mock_stream);
         session.subscribe(mailbox).await.unwrap();
@@ -1470,9 +1479,9 @@ mod tests {
 
     #[async_attributes::test]
     async fn unsubscribe() {
-        let response = b"a1 OK UNSUBSCRIBE completed\r\n".to_vec();
+        let response = b"A0001 OK UNSUBSCRIBE completed\r\n".to_vec();
         let mailbox = "INBOX";
-        let command = format!("a1 UNSUBSCRIBE {}\r\n", quote!(mailbox));
+        let command = format!("A0001 UNSUBSCRIBE {}\r\n", quote!(mailbox));
         let mock_stream = MockStream::new(response);
         let mut session = mock_session!(mock_stream);
         session.unsubscribe(mailbox).await.unwrap();
@@ -1484,12 +1493,12 @@ mod tests {
 
     #[async_attributes::test]
     async fn expunge() {
-        let response = b"a1 OK EXPUNGE completed\r\n".to_vec();
+        let response = b"A0001 OK EXPUNGE completed\r\n".to_vec();
         let mock_stream = MockStream::new(response);
         let mut session = mock_session!(mock_stream);
         session.expunge().await.unwrap();
         assert!(
-            session.stream.stream.written_buf == b"a1 EXPUNGE\r\n".to_vec(),
+            session.stream.stream.written_buf == b"A0001 EXPUNGE\r\n".to_vec(),
             "Invalid expunge command"
         );
     }
@@ -1499,25 +1508,25 @@ mod tests {
         let response = b"* 2 EXPUNGE\r\n\
             * 3 EXPUNGE\r\n\
             * 4 EXPUNGE\r\n\
-            a1 OK UID EXPUNGE completed\r\n"
+            A0001 OK UID EXPUNGE completed\r\n"
             .to_vec();
         let mock_stream = MockStream::new(response);
         let mut session = mock_session!(mock_stream);
         session.uid_expunge("2:4").await.unwrap();
         assert!(
-            session.stream.stream.written_buf == b"a1 UID EXPUNGE 2:4\r\n".to_vec(),
+            session.stream.stream.written_buf == b"A0001 UID EXPUNGE 2:4\r\n".to_vec(),
             "Invalid expunge command"
         );
     }
 
     #[async_attributes::test]
     async fn check() {
-        let response = b"a1 OK CHECK completed\r\n".to_vec();
+        let response = b"A0001 OK CHECK completed\r\n".to_vec();
         let mock_stream = MockStream::new(response);
         let mut session = mock_session!(mock_stream);
         session.check().await.unwrap();
         assert!(
-            session.stream.stream.written_buf == b"a1 CHECK\r\n".to_vec(),
+            session.stream.stream.written_buf == b"A0001 CHECK\r\n".to_vec(),
             "Invalid check command"
         );
     }
@@ -1531,7 +1540,7 @@ mod tests {
             * OK [UNSEEN 1] First unseen.\r\n\
             * OK [UIDVALIDITY 1257842737] UIDs valid\r\n\
             * OK [UIDNEXT 2] Predicted next UID\r\n\
-            a1 OK [READ-ONLY] Select completed.\r\n"
+            A0001 OK [READ-ONLY] Select completed.\r\n"
             .to_vec();
         let expected_mailbox = Mailbox {
             flags: vec![
@@ -1549,7 +1558,7 @@ mod tests {
             uid_validity: Some(1257842737),
         };
         let mailbox_name = "INBOX";
-        let command = format!("a1 EXAMINE {}\r\n", quote!(mailbox_name));
+        let command = format!("A0001 EXAMINE {}\r\n", quote!(mailbox_name));
         let mock_stream = MockStream::new(response);
         let mut session = mock_session!(mock_stream);
         let mailbox = session.examine(mailbox_name).await.unwrap();
@@ -1570,7 +1579,7 @@ mod tests {
             * OK [UNSEEN 1] First unseen.\r\n\
             * OK [UIDVALIDITY 1257842737] UIDs valid\r\n\
             * OK [UIDNEXT 2] Predicted next UID\r\n\
-            a1 OK [READ-ONLY] Select completed.\r\n"
+            A0001 OK [READ-ONLY] Select completed.\r\n"
             .to_vec();
         let expected_mailbox = Mailbox {
             flags: vec![
@@ -1595,7 +1604,7 @@ mod tests {
             uid_validity: Some(1257842737),
         };
         let mailbox_name = "INBOX";
-        let command = format!("a1 SELECT {}\r\n", quote!(mailbox_name));
+        let command = format!("A0001 SELECT {}\r\n", quote!(mailbox_name));
         let mock_stream = MockStream::new(response);
         let mut session = mock_session!(mock_stream);
         let mailbox = session.select(mailbox_name).await.unwrap();
@@ -1609,14 +1618,14 @@ mod tests {
     #[async_attributes::test]
     async fn search() {
         let response = b"* SEARCH 1 2 3 4 5\r\n\
-            a1 OK Search completed\r\n"
+            A0001 OK Search completed\r\n"
             .to_vec();
         let mock_stream = MockStream::new(response);
         let mut session = mock_session!(mock_stream);
         let ids = session.search("Unseen").await.unwrap();
         let ids: HashSet<u32> = ids.iter().cloned().collect();
         assert!(
-            session.stream.stream.written_buf == b"a1 SEARCH Unseen\r\n".to_vec(),
+            session.stream.stream.written_buf == b"A0001 SEARCH Unseen\r\n".to_vec(),
             "Invalid search command"
         );
         assert_eq!(ids, [1, 2, 3, 4, 5].iter().cloned().collect());
@@ -1625,14 +1634,14 @@ mod tests {
     #[async_attributes::test]
     async fn uid_search() {
         let response = b"* SEARCH 1 2 3 4 5\r\n\
-            a1 OK Search completed\r\n"
+            A0001 OK Search completed\r\n"
             .to_vec();
         let mock_stream = MockStream::new(response);
         let mut session = mock_session!(mock_stream);
         let ids = session.uid_search("Unseen").await.unwrap();
         let ids: HashSet<Uid> = ids.iter().cloned().collect();
         assert!(
-            session.stream.stream.written_buf == b"a1 UID SEARCH Unseen\r\n".to_vec(),
+            session.stream.stream.written_buf == b"A0001 UID SEARCH Unseen\r\n".to_vec(),
             "Invalid search command"
         );
         assert_eq!(ids, [1, 2, 3, 4, 5].iter().cloned().collect());
@@ -1641,14 +1650,14 @@ mod tests {
     #[async_attributes::test]
     async fn capability() {
         let response = b"* CAPABILITY IMAP4rev1 STARTTLS AUTH=GSSAPI LOGINDISABLED\r\n\
-            a1 OK CAPABILITY completed\r\n"
+            A0001 OK CAPABILITY completed\r\n"
             .to_vec();
         let expected_capabilities = vec!["IMAP4rev1", "STARTTLS", "AUTH=GSSAPI", "LOGINDISABLED"];
         let mock_stream = MockStream::new(response);
         let mut session = mock_session!(mock_stream);
         let capabilities = session.capabilities().await.unwrap();
         assert!(
-            session.stream.stream.written_buf == b"a1 CAPABILITY\r\n".to_vec(),
+            session.stream.stream.written_buf == b"A0001 CAPABILITY\r\n".to_vec(),
             "Invalid capability command"
         );
         assert_eq!(capabilities.len(), 4);
@@ -1659,9 +1668,9 @@ mod tests {
 
     #[async_attributes::test]
     async fn create() {
-        let response = b"a1 OK CREATE completed\r\n".to_vec();
+        let response = b"A0001 OK CREATE completed\r\n".to_vec();
         let mailbox_name = "INBOX";
-        let command = format!("a1 CREATE {}\r\n", quote!(mailbox_name));
+        let command = format!("A0001 CREATE {}\r\n", quote!(mailbox_name));
         let mock_stream = MockStream::new(response);
         let mut session = mock_session!(mock_stream);
         session.create(mailbox_name).await.unwrap();
@@ -1673,9 +1682,9 @@ mod tests {
 
     #[async_attributes::test]
     async fn delete() {
-        let response = b"a1 OK DELETE completed\r\n".to_vec();
+        let response = b"A0001 OK DELETE completed\r\n".to_vec();
         let mailbox_name = "INBOX";
-        let command = format!("a1 DELETE {}\r\n", quote!(mailbox_name));
+        let command = format!("A0001 DELETE {}\r\n", quote!(mailbox_name));
         let mock_stream = MockStream::new(response);
         let mut session = mock_session!(mock_stream);
         session.delete(mailbox_name).await.unwrap();
@@ -1687,24 +1696,24 @@ mod tests {
 
     #[async_attributes::test]
     async fn noop() {
-        let response = b"a1 OK NOOP completed\r\n".to_vec();
+        let response = b"A0001 OK NOOP completed\r\n".to_vec();
         let mock_stream = MockStream::new(response);
         let mut session = mock_session!(mock_stream);
         session.noop().await.unwrap();
         assert!(
-            session.stream.stream.written_buf == b"a1 NOOP\r\n".to_vec(),
+            session.stream.stream.written_buf == b"A0001 NOOP\r\n".to_vec(),
             "Invalid noop command"
         );
     }
 
     #[async_attributes::test]
     async fn close() {
-        let response = b"a1 OK CLOSE completed\r\n".to_vec();
+        let response = b"A0001 OK CLOSE completed\r\n".to_vec();
         let mock_stream = MockStream::new(response);
         let mut session = mock_session!(mock_stream);
         session.close().await.unwrap();
         assert!(
-            session.stream.stream.written_buf == b"a1 CLOSE\r\n".to_vec(),
+            session.stream.stream.written_buf == b"A0001 CLOSE\r\n".to_vec(),
             "Invalid close command"
         );
     }
@@ -1744,7 +1753,7 @@ mod tests {
         let res = "* 2 FETCH (FLAGS (\\Deleted \\Seen))\r\n\
                    * 3 FETCH (FLAGS (\\Deleted))\r\n\
                    * 4 FETCH (FLAGS (\\Deleted \\Flagged \\Seen))\r\n\
-                   a1 OK STORE completed\r\n";
+                   A0001 OK STORE completed\r\n";
 
         generic_with_uid(res, "STORE", "2.4", "+FLAGS (\\Deleted)", prefix, op).await;
     }
@@ -1797,10 +1806,10 @@ mod tests {
         let response = b"* OK [COPYUID 1511554416 142,399 41:42] Moved UIDs.\r\n\
             * 2 EXPUNGE\r\n\
             * 1 EXPUNGE\r\n\
-            a1 OK Move completed\r\n"
+            A0001 OK Move completed\r\n"
             .to_vec();
         let mailbox_name = "MEETING";
-        let command = format!("a1 MOVE 1:2 {}\r\n", quote!(mailbox_name));
+        let command = format!("A0001 MOVE 1:2 {}\r\n", quote!(mailbox_name));
         let mock_stream = MockStream::new(response);
         let mut session = mock_session!(mock_stream);
         session.mv("1:2", mailbox_name).await.unwrap();
@@ -1815,10 +1824,10 @@ mod tests {
         let response = b"* OK [COPYUID 1511554416 142,399 41:42] Moved UIDs.\r\n\
             * 2 EXPUNGE\r\n\
             * 1 EXPUNGE\r\n\
-            a1 OK Move completed\r\n"
+            A0001 OK Move completed\r\n"
             .to_vec();
         let mailbox_name = "MEETING";
-        let command = format!("a1 UID MOVE 41:42 {}\r\n", quote!(mailbox_name));
+        let command = format!("A0001 UID MOVE 41:42 {}\r\n", quote!(mailbox_name));
         let mock_stream = MockStream::new(response);
         let mut session = mock_session!(mock_stream);
         session.uid_mv("41:42", mailbox_name).await.unwrap();
@@ -1879,8 +1888,8 @@ mod tests {
             ) -> K,
         K: 'a + Future<Output = Result<T>>,
     {
-        let resp = format!("a1 {}\r\n", res).as_bytes().to_vec();
-        let line = format!("a1{}{} {} {}\r\n", prefix, cmd, seq, query);
+        let resp = format!("A0001 {}\r\n", res).as_bytes().to_vec();
+        let line = format!("A0001{}{} {} {}\r\n", prefix, cmd, seq, query);
         let session = Arc::new(Mutex::new(mock_session!(MockStream::new(resp))));
 
         {
