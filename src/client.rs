@@ -19,26 +19,10 @@ use super::types::*;
 use crate::codec::{ConnStream, IdGenerator, ImapCodec, Request, ResponseData};
 use crate::extensions;
 
-static TAG_PREFIX: &str = "a";
-const INITIAL_TAG: u32 = 0;
-const CR: u8 = 0x0d;
-const LF: u8 = 0x0a;
-
 macro_rules! quote {
     ($x:expr) => {
         format!("\"{}\"", $x.replace(r"\", r"\\").replace("\"", "\\\""))
     };
-}
-
-fn validate_str(value: &str) -> Result<String> {
-    let quoted = quote!(value);
-    if quoted.find('\n').is_some() {
-        return Err(Error::Validate(ValidateError('\n')));
-    }
-    if quoted.find('\r').is_some() {
-        return Err(Error::Validate(ValidateError('\r')));
-    }
-    Ok(quoted)
 }
 
 /// An authenticated IMAP session providing the usual IMAP commands. This type is what you get from
@@ -79,7 +63,6 @@ pub struct Client<T> {
 #[doc(hidden)]
 pub struct Connection<T> {
     pub(crate) stream: T,
-    tag: u32,
 
     /// Enable debug mode for this connection so that all client-server interactions are printed to
     /// `STDERR`.
@@ -88,7 +71,8 @@ pub struct Connection<T> {
     /// Tracks if we have read a greeting.
     pub greeting_read: bool,
 
-    request_ids: IdGenerator,
+    /// Manages the request ids.
+    pub(crate) request_ids: IdGenerator,
 }
 
 // `Deref` instances are so we can make use of the same underlying primitives in `Client` and
@@ -207,7 +191,6 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
         Client {
             conn: Connection {
                 stream,
-                tag: INITIAL_TAG,
                 debug: false,
                 greeting_read: false,
                 request_ids: IdGenerator::new(),
@@ -541,8 +524,13 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
 
     /// Noop always succeeds, and it does nothing.
     pub async fn noop(&mut self) -> Result<()> {
-        self.run_command("NOOP").await?;
-        parse_noop(&mut self.conn.stream, self.unsolicited_responses_tx.clone()).await?;
+        let id = self.run_command("NOOP").await?;
+        parse_noop(
+            &mut self.conn.stream,
+            self.unsolicited_responses_tx.clone(),
+            id,
+        )
+        .await?;
         Ok(())
     }
 
@@ -671,9 +659,13 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
     /// listing of capabilities that the server supports.  The server will include "IMAP4rev1" as
     /// one of the listed capabilities. See [`Capabilities`] for further details.
     pub async fn capabilities(&mut self) -> Result<Capabilities> {
-        self.run_command("CAPABILITY").await?;
-        let c = parse_capabilities(&mut self.conn.stream, self.unsolicited_responses_tx.clone())
-            .await?;
+        let id = self.run_command("CAPABILITY").await?;
+        let c = parse_capabilities(
+            &mut self.conn.stream,
+            self.unsolicited_responses_tx.clone(),
+            id,
+        )
+        .await?;
         Ok(c)
     }
 
@@ -681,8 +673,12 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
     /// removes all messages that have [`Flag::Deleted`] set from the currently selected mailbox.
     /// The message sequence number of each message that is removed is returned.
     pub async fn expunge<'a>(&'a mut self) -> Result<impl Stream<Item = Result<Seq>> + 'a> {
-        self.run_command("EXPUNGE").await?;
-        let res = parse_expunge(&mut self.conn.stream, self.unsolicited_responses_tx.clone());
+        let id = self.run_command("EXPUNGE").await?;
+        let res = parse_expunge(
+            &mut self.conn.stream,
+            self.unsolicited_responses_tx.clone(),
+            id,
+        );
         Ok(res)
     }
 
@@ -712,9 +708,14 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
         &'a mut self,
         uid_set: S,
     ) -> Result<impl Stream<Item = Result<Uid>> + 'a> {
-        self.run_command(&format!("UID EXPUNGE {}", uid_set.as_ref()))
+        let id = self
+            .run_command(&format!("UID EXPUNGE {}", uid_set.as_ref()))
             .await?;
-        let res = parse_expunge(&mut self.conn.stream, self.unsolicited_responses_tx.clone());
+        let res = parse_expunge(
+            &mut self.conn.stream,
+            self.unsolicited_responses_tx.clone(),
+            id,
+        );
         Ok(res)
     }
 
@@ -986,16 +987,18 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
         reference_name: Option<&str>,
         mailbox_pattern: Option<&str>,
     ) -> Result<impl Stream<Item = Result<Name<'_>>>> {
-        self.run_command(&format!(
-            "LIST {} {}",
-            quote!(reference_name.unwrap_or("")),
-            mailbox_pattern.unwrap_or("\"\"")
-        ))
-        .await?;
+        let id = self
+            .run_command(&format!(
+                "LIST {} {}",
+                quote!(reference_name.unwrap_or("")),
+                mailbox_pattern.unwrap_or("\"\"")
+            ))
+            .await?;
 
         Ok(parse_names(
             &mut self.conn.stream,
             self.unsolicited_responses_tx.clone(),
+            id,
         ))
     }
 
@@ -1019,13 +1022,18 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
         reference_name: Option<&str>,
         mailbox_pattern: Option<&str>,
     ) -> Result<impl Stream<Item = Result<Name<'_>>>> {
-        self.run_command(&format!(
-            "LSUB {} {}",
-            quote!(reference_name.unwrap_or("")),
-            mailbox_pattern.unwrap_or("")
-        ))
-        .await?;
-        let names = parse_names(&mut self.conn.stream, self.unsolicited_responses_tx.clone());
+        let id = self
+            .run_command(&format!(
+                "LSUB {} {}",
+                quote!(reference_name.unwrap_or("")),
+                mailbox_pattern.unwrap_or("")
+            ))
+            .await?;
+        let names = parse_names(
+            &mut self.conn.stream,
+            self.unsolicited_responses_tx.clone(),
+            id,
+        );
 
         Ok(names)
     }
@@ -1197,9 +1205,15 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
     ///  - `BEFORE <date>`: Messages whose internal date (disregarding time and timezone) is earlier than the specified date.
     ///  - `SINCE <date>`: Messages whose internal date (disregarding time and timezone) is within or later than the specified date.
     pub async fn search<S: AsRef<str>>(&mut self, query: S) -> Result<HashSet<Seq>> {
-        self.run_command(&format!("SEARCH {}", query.as_ref()))
+        let id = self
+            .run_command(&format!("SEARCH {}", query.as_ref()))
             .await?;
-        let seqs = parse_ids(&mut self.conn.stream, self.unsolicited_responses_tx.clone()).await?;
+        let seqs = parse_ids(
+            &mut self.conn.stream,
+            self.unsolicited_responses_tx.clone(),
+            id,
+        )
+        .await?;
 
         Ok(seqs)
     }
@@ -1208,9 +1222,15 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
     /// are [`Uid`] instead of [`Seq`]. See also the [`UID`
     /// command](https://tools.ietf.org/html/rfc3501#section-6.4.8).
     pub async fn uid_search<S: AsRef<str>>(&mut self, query: S) -> Result<HashSet<Uid>> {
-        self.run_command(&format!("UID SEARCH {}", query.as_ref()))
+        let id = self
+            .run_command(&format!("UID SEARCH {}", query.as_ref()))
             .await?;
-        let uids = parse_ids(&mut self.conn.stream, self.unsolicited_responses_tx.clone()).await?;
+        let uids = parse_ids(
+            &mut self.conn.stream,
+            self.unsolicited_responses_tx.clone(),
+            id,
+        )
+        .await?;
 
         Ok(uids)
     }
@@ -1300,6 +1320,17 @@ impl<T: Stream<Item = ResponseData> + futures::Sink<Request, Error = io::Error> 
             }
         }
     }
+}
+
+fn validate_str(value: &str) -> Result<String> {
+    let quoted = quote!(value);
+    if quoted.find('\n').is_some() {
+        return Err(Error::Validate(ValidateError('\n')));
+    }
+    if quoted.find('\r').is_some() {
+        return Err(Error::Validate(ValidateError('\r')));
+    }
+    Ok(quoted)
 }
 
 #[cfg(test)]
