@@ -1,5 +1,4 @@
 use async_imap::error::{Error, Result};
-use async_std::prelude::*;
 use async_std::task;
 use std::env;
 
@@ -10,14 +9,13 @@ fn main() -> Result<()> {
             eprintln!("need three arguments: imap-server login password");
             Err(Error::Bad("need three arguments".into()))
         } else {
-            let res = fetch_inbox_top(&args[1], &args[2], &args[3]).await?;
-            println!("**result:\n{}", res.unwrap());
+            perform_idle(&args[1], &args[2], &args[3]).await?;
             Ok(())
         }
     })
 }
 
-async fn fetch_inbox_top(imap_server: &str, login: &str, password: &str) -> Result<Option<String>> {
+async fn perform_idle(imap_server: &str, login: &str, password: &str) -> Result<()> {
     let tls = async_tls::TlsConnector::new();
 
     // we pass in the imap_server twice to check that the server's TLS
@@ -34,25 +32,11 @@ async fn fetch_inbox_top(imap_server: &str, login: &str, password: &str) -> Resu
     imap_session.select("INBOX").await?;
     println!("** INBOX selected");
 
-    // fetch message number 1 in this mailbox, along with its RFC822 field.
-    // RFC 822 dictates the format of the body of e-mails
-    let messages_stream = imap_session.fetch("1", "RFC822").await?;
-    let messages: Vec<_> = messages_stream.collect::<Result<_>>().await?;
-    let message = if let Some(m) = messages.first() {
-        m
-    } else {
-        return Ok(None);
-    };
-
-    // extract the message's body
-    let body = message.body().expect("message did not have a body!");
-    let body = std::str::from_utf8(body)
-        .expect("message was not valid utf-8")
-        .to_string();
-    println!("** 1 message received, logging out");
+    println!("** XXX TODO: implement idle call + readline from stdin to interrupt");
 
     // be nice to the server and log out
+    println!("** Logging out");
     imap_session.logout().await?;
 
-    Ok(Some(body))
+    Ok(())
 }
