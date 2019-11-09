@@ -323,32 +323,17 @@ fn idle() -> async_imap::error::Result<()> {
         let mut idle = session.idle();
         idle.init().await?;
 
-        let (send, receive) = async_std::sync::channel(1);
-
-        #[derive(Debug)]
-        enum IdleResult {
-            Interrupt,
-            Message,
-        }
+        let (idle_stream, interrupt) = idle.stream();
+        println!("idle wait");
 
         task::spawn(async move {
             println!("waiting for 1s");
             task::sleep(Duration::from_secs(1)).await;
             println!("interrupting idle");
-            send.send(()).await;
+            drop(interrupt);
         });
 
-        let idle_stream = idle.stream();
-        println!("idle wait");
-
-        let interrupt_chan =
-            futures::future::FutureExt::map(receive.recv(), |_| IdleResult::Interrupt);
-        let idle_chan =
-            futures::future::FutureExt::map(idle_stream.take(1).collect::<Vec<_>>(), |_| {
-                IdleResult::Message
-            });
-
-        let idle_result = interrupt_chan.race(idle_chan).await;
+        let idle_result = idle_stream.take(1).collect::<Vec<_>>().await;
         println!("idle msg: {:#?}", &idle_result);
 
         // return the session after we are done with it

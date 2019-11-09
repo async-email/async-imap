@@ -84,12 +84,19 @@ impl<T: Read + Write + Unpin + fmt::Debug> Handle<T> {
 
     /// Start listening to the server side resonses.
     /// Must be called after [Handle::init].
-    pub fn stream(&mut self) -> IdleStream<'_, Self> {
+    pub fn stream(
+        &mut self,
+    ) -> (
+        stop_token::StopStream<IdleStream<'_, Self>>,
+        stop_token::StopSource,
+    ) {
         assert!(
             self.id.is_some(),
             "Cannot listen to response without starting IDLE"
         );
-        IdleStream::new(self)
+        let interrupt = stop_token::StopSource::new();
+        let stream = interrupt.stop_token().stop_stream(IdleStream::new(self));
+        (stream, interrupt)
     }
 
     /// Initialise the idle connection by sending the `IDLE` command to the server.
