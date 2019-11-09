@@ -51,15 +51,11 @@ impl From<&CapabilityRef<'_>> for Capability {
 ///
 /// Client implementations SHOULD NOT require any capability name other than `IMAP4rev1`, and MUST
 /// ignore any unknown capability names.
-pub struct Capabilities(
-    // Note that this field isn't *actually* 'static.
-    // Rather, it is tied to the lifetime of the `ZeroCopy` that contains this `Name`.
-    pub(crate) HashSet<Capability>,
-);
+pub struct Capabilities(pub(crate) HashSet<Capability>);
 
 impl Capabilities {
     /// Check if the server has the given capability.
-    pub fn has<'a>(&self, cap: &Capability) -> bool {
+    pub fn has(&self, cap: &Capability) -> bool {
         self.0.contains(cap)
     }
 

@@ -32,7 +32,7 @@ pub(crate) fn parse_names<'a, T: Stream<Item = ResponseData> + Unpin>(
                         name,
                     }) => Some(Ok(Name {
                         attributes: flags
-                            .into_iter()
+                            .iter()
                             .map(|s| NameAttribute::from((*s).to_string()))
                             .collect(),
                         delimiter: (*delimiter).map(Into::into),
@@ -186,7 +186,6 @@ pub(crate) async fn parse_mailbox<T: Stream<Item = ResponseData> + Unpin>(
         .next()
         .await
     {
-        println!("mailbox parsing {:?}", resp.parsed());
         match resp.parsed() {
             Response::Data { status, code, .. } => {
                 if let imap_proto::Status::Ok = status {
@@ -209,7 +208,7 @@ pub(crate) async fn parse_mailbox<T: Stream<Item = ResponseData> + Unpin>(
                     Some(ResponseCode::PermanentFlags(flags)) => {
                         mailbox
                             .permanent_flags
-                            .extend(flags.into_iter().map(|s| (*s).to_string()).map(Flag::from));
+                            .extend(flags.iter().map(|s| (*s).to_string()).map(Flag::from));
                     }
                     _ => {}
                 }
@@ -232,7 +231,7 @@ pub(crate) async fn parse_mailbox<T: Stream<Item = ResponseData> + Unpin>(
                 MailboxDatum::Flags(flags) => {
                     mailbox
                         .flags
-                        .extend(flags.into_iter().map(|s| (*s).to_string()).map(Flag::from));
+                        .extend(flags.iter().map(|s| (*s).to_string()).map(Flag::from));
                 }
                 MailboxDatum::List { .. } => {}
                 _ => {}
@@ -246,7 +245,6 @@ pub(crate) async fn parse_mailbox<T: Stream<Item = ResponseData> + Unpin>(
         }
     }
 
-    println!("done mailbox parsing");
     Ok(mailbox)
 }
 

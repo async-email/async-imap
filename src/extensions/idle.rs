@@ -7,7 +7,7 @@ use async_std::io::{self, Read, Write};
 use async_std::prelude::*;
 use async_std::stream::Stream;
 use futures::task::{Context, Poll};
-use imap_proto::{RequestId, Response};
+use imap_proto::{RequestId, Response, Status};
 
 use crate::client::Session;
 use crate::codec::ResponseData;
@@ -101,9 +101,29 @@ impl<T: Read + Write + Unpin + fmt::Debug> Handle<T> {
                 Response::Continue { .. } => {
                     return Ok(());
                 }
+                Response::Done {
+                    tag,
+                    status,
+                    information,
+                    ..
+                } => {
+                    if tag == self.id.as_ref().unwrap() {
+                        if let Status::Bad = status {
+                            return Err(io::Error::new(
+                                io::ErrorKind::ConnectionRefused,
+                                information.as_ref().unwrap().to_string(),
+                            )
+                            .into());
+                        }
+                    }
+                    eprintln!(
+                        "unexpected done response {:?} {:?} {:?}",
+                        tag, status, information
+                    );
+                }
                 v => {
                     // TODO: send through unhandled responses
-                    println!("unexpected response {:?}", v);
+                    eprintln!("unexpected response {:?}", v);
                 }
             }
         }

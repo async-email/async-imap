@@ -1,14 +1,10 @@
-extern crate async_imap;
-extern crate async_tls;
-extern crate lettre;
-extern crate lettre_email;
-extern crate native_tls;
-extern crate rustls;
+use std::time::Duration;
 
 use async_imap::Session;
 use async_std::net::TcpStream;
 use async_std::prelude::*;
 use async_std::sync::Arc;
+use async_std::task;
 use lettre::Transport;
 
 fn native_tls() -> native_tls::TlsConnector {
@@ -80,7 +76,7 @@ fn smtp(user: &str) -> lettre::SmtpTransport {
 #[ignore]
 #[test]
 fn connect_insecure_then_secure() {
-    async_std::task::block_on(async {
+    task::block_on(async {
         let host = std::env::var("TEST_HOST").unwrap_or("127.0.0.1".to_string());
         let stream = TcpStream::connect((host.as_ref(), 3143)).await.unwrap();
 
@@ -94,7 +90,7 @@ fn connect_insecure_then_secure() {
 
 #[test]
 fn connect_secure() {
-    async_std::task::block_on(async {
+    task::block_on(async {
         async_imap::connect(
             &format!(
                 "{}:3993",
@@ -110,14 +106,14 @@ fn connect_secure() {
 
 #[test]
 fn login() {
-    async_std::task::block_on(async {
+    task::block_on(async {
         session("readonly-test@localhost").await;
     });
 }
 
 #[test]
 fn logout() {
-    async_std::task::block_on(async {
+    task::block_on(async {
         let mut s = session("readonly-test@localhost").await;
         s.logout().await.unwrap();
     });
@@ -125,7 +121,7 @@ fn logout() {
 
 #[test]
 fn inbox_zero() {
-    async_std::task::block_on(async {
+    task::block_on(async {
         // https://github.com/greenmail-mail-test/greenmail/issues/265
         let mut s = session("readonly-test@localhost").await;
         s.select("INBOX").await.unwrap();
@@ -136,7 +132,7 @@ fn inbox_zero() {
 
 #[test]
 fn inbox() {
-    async_std::task::block_on(async {
+    task::block_on(async {
         let to = "inbox@localhost";
 
         // first log in so we'll see the unsolicited e-mails
@@ -225,7 +221,7 @@ fn inbox() {
 
 #[test]
 fn inbox_uid() {
-    async_std::task::block_on(async {
+    task::block_on(async {
         let to = "inbox-uid@localhost";
 
         // first log in so we'll see the unsolicited e-mails
@@ -297,7 +293,7 @@ fn inbox_uid() {
 #[test]
 #[ignore]
 fn list() {
-    async_std::task::block_on(async {
+    task::block_on(async {
         let mut s = session("readonly-test@localhost").await;
         s.select("INBOX").await.unwrap();
         let subdirs: Vec<_> = s.list(None, Some("%")).await.unwrap().collect().await;
@@ -305,4 +301,62 @@ fn list() {
 
         // TODO: make a subdir
     });
+}
+
+#[test]
+#[ignore] // Greenmail does not support IDLE :(
+fn idle() -> async_imap::error::Result<()> {
+    task::block_on(async {
+        let mut session = session("idle-test@localhost").await;
+
+        // get that inbox
+        let res = session.select("INBOX").await?;
+        println!("selected: {:#?}", res);
+
+        // fetchy fetch
+        let msg_stream = session.fetch("1:3", "(FLAGS BODY.PEEK[])").await?;
+        let msgs = msg_stream.collect::<Vec<_>>().await;
+        println!("msgs: {:?}", msgs.len());
+
+        // Idle session
+        println!("starting idle");
+        let mut idle = session.idle();
+        idle.init().await?;
+
+        let (send, receive) = async_std::sync::channel(1);
+
+        #[derive(Debug)]
+        enum IdleResult {
+            Interrupt,
+            Message,
+        }
+
+        task::spawn(async move {
+            println!("waiting for 1s");
+            task::sleep(Duration::from_secs(1)).await;
+            println!("interrupting idle");
+            send.send(()).await;
+        });
+
+        let idle_stream = idle.stream();
+        println!("idle wait");
+
+        let interrupt_chan =
+            futures::future::FutureExt::map(receive.recv(), |_| IdleResult::Interrupt);
+        let idle_chan =
+            futures::future::FutureExt::map(idle_stream.take(1).collect::<Vec<_>>(), |_| {
+                IdleResult::Message
+            });
+
+        let idle_result = interrupt_chan.race(idle_chan).await;
+        println!("idle msg: {:#?}", &idle_result);
+
+        // return the session after we are done with it
+        let mut session = idle.done().await?;
+
+        println!("logging out");
+        session.logout().await?;
+
+        Ok(())
+    })
 }

@@ -75,9 +75,7 @@ impl Fetch {
             .suffix()
             .iter()
             .filter_map(|attr| match attr {
-                AttributeValue::Flags(raw_flags) => {
-                    Some(raw_flags.into_iter().map(|s| Flag::from(*s)))
-                }
+                AttributeValue::Flags(raw_flags) => Some(raw_flags.iter().map(|s| Flag::from(*s))),
                 _ => None,
             })
             .flatten()

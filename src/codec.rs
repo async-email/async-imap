@@ -38,7 +38,6 @@ impl<'a> Decoder for ImapCodec {
                 // freed as long as we keep a reference alive, which we do
                 // by retaining a reference to the split buffer, below.
                 let response = unsafe { std::mem::transmute(response) };
-                // println!("got response: {:?}", &response);
                 (response, buf.len() - remaining.len())
             }
             Err(nom::Err::Incomplete(Needed::Size(min))) => {
@@ -64,8 +63,6 @@ impl Encoder for ImapCodec {
     type Item = Request;
     type Error = io::Error;
     fn encode(&mut self, msg: Self::Item, dst: &mut BytesMut) -> Result<(), io::Error> {
-        println!("writing {:#?}", std::str::from_utf8(&msg.1));
-
         if let Some(tag) = msg.0 {
             dst.put(tag.as_bytes());
             dst.put(b' ');
@@ -176,7 +173,7 @@ impl<
         match item {
             Ok(res) => Poll::Ready(Some(res)),
             Err(err) => {
-                println!("error: {:#?}", err);
+                eprintln!("Receive Error: {:#?}", err);
                 Poll::Ready(None)
             }
         }

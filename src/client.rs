@@ -470,11 +470,11 @@ impl<T: Read + Write + Unpin + fmt::Debug> Session<T> {
     ///  - `RFC822.HEADER`: Functionally equivalent to `BODY.PEEK[HEADER]`.
     ///  - `RFC822.SIZE`: The [RFC-2822](https://tools.ietf.org/html/rfc2822) size of the message.
     ///  - `UID`: The unique identifier for the message.
-    pub async fn fetch<'a, S1, S2>(
-        &'a mut self,
+    pub async fn fetch<S1, S2>(
+        &mut self,
         sequence_set: S1,
         query: S2,
-    ) -> Result<impl Stream<Item = Result<Fetch>> + 'a>
+    ) -> Result<impl Stream<Item = Result<Fetch>> + '_>
     where
         S1: AsRef<str>,
         S2: AsRef<str>,
@@ -497,11 +497,11 @@ impl<T: Read + Write + Unpin + fmt::Debug> Session<T> {
 
     /// Equivalent to [`Session::fetch`], except that all identifiers in `uid_set` are
     /// [`Uid`]s. See also the [`UID` command](https://tools.ietf.org/html/rfc3501#section-6.4.8).
-    pub async fn uid_fetch<'a, S1, S2>(
-        &'a mut self,
+    pub async fn uid_fetch<S1, S2>(
+        &mut self,
         uid_set: S1,
         query: S2,
-    ) -> Result<impl Stream<Item = Result<Fetch>> + 'a>
+    ) -> Result<impl Stream<Item = Result<Fetch>> + '_>
     where
         S1: AsRef<str>,
         S2: AsRef<str>,
@@ -671,7 +671,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Session<T> {
     /// The [`EXPUNGE` command](https://tools.ietf.org/html/rfc3501#section-6.4.3) permanently
     /// removes all messages that have [`Flag::Deleted`] set from the currently selected mailbox.
     /// The message sequence number of each message that is removed is returned.
-    pub async fn expunge<'a>(&'a mut self) -> Result<impl Stream<Item = Result<Seq>> + 'a> {
+    pub async fn expunge(&mut self) -> Result<impl Stream<Item = Result<Seq>> + '_> {
         let id = self.run_command("EXPUNGE").await?;
         let res = parse_expunge(
             &mut self.conn.stream,
@@ -703,10 +703,10 @@ impl<T: Read + Write + Unpin + fmt::Debug> Session<T> {
     ///
     /// Alternatively, the client may fall back to using just [`Session::expunge`], risking the
     /// unintended removal of some messages.
-    pub async fn uid_expunge<'a, S: AsRef<str>>(
-        &'a mut self,
+    pub async fn uid_expunge<S: AsRef<str>>(
+        &mut self,
         uid_set: S,
-    ) -> Result<impl Stream<Item = Result<Uid>> + 'a> {
+    ) -> Result<impl Stream<Item = Result<Uid>> + '_> {
         let id = self
             .run_command(&format!("UID EXPUNGE {}", uid_set.as_ref()))
             .await?;
@@ -799,11 +799,11 @@ impl<T: Read + Write + Unpin + fmt::Debug> Session<T> {
     ///     Ok(())
     /// }
     /// ```
-    pub async fn store<'a, S1, S2>(
-        &'a mut self,
+    pub async fn store<S1, S2>(
+        &mut self,
         sequence_set: S1,
         query: S2,
-    ) -> Result<impl Stream<Item = Result<Fetch>> + 'a>
+    ) -> Result<impl Stream<Item = Result<Fetch>> + '_>
     where
         S1: AsRef<str>,
         S2: AsRef<str>,
@@ -825,11 +825,11 @@ impl<T: Read + Write + Unpin + fmt::Debug> Session<T> {
 
     /// Equivalent to [`Session::store`], except that all identifiers in `sequence_set` are
     /// [`Uid`]s. See also the [`UID` command](https://tools.ietf.org/html/rfc3501#section-6.4.8).
-    pub async fn uid_store<'a, S1, S2>(
-        &'a mut self,
+    pub async fn uid_store<S1, S2>(
+        &mut self,
         uid_set: S1,
         query: S2,
-    ) -> Result<impl Stream<Item = Result<Fetch>> + 'a>
+    ) -> Result<impl Stream<Item = Result<Fetch>> + '_>
     where
         S1: AsRef<str>,
         S2: AsRef<str>,
@@ -1260,8 +1260,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Session<T> {
 
     /// Read the next response on the connection.
     pub async fn read_response(&mut self) -> Option<ResponseData> {
-        let res = self.conn.read_response().await;
-        res
+        self.conn.read_response().await
     }
 }
 
@@ -1269,8 +1268,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Connection<T> {
     unsafe_pinned!(stream: ConnStream<Framed<T, ImapCodec>>);
 
     async fn read_response(&mut self) -> Option<ResponseData> {
-        let res = self.stream.next().await;
-        res
+        self.stream.next().await
     }
 
     pub(crate) async fn run_command_untagged(&mut self, command: &str) -> Result<()> {
@@ -1300,26 +1298,22 @@ impl<T: Read + Write + Unpin + fmt::Debug> Connection<T> {
 
     pub(crate) async fn check_ok(&mut self, id: RequestId) -> Result<()> {
         while let Some(res) = self.stream.next().await {
-            println!("S: {:#?}", res);
-            match res.parsed() {
-                Response::Done { status, tag, .. } => {
-                    if let imap_proto::Status::Ok = status {
-                        if tag == &id {
-                            return Ok(());
-                        } else {
-                            return Err(Error::Io(io::Error::new(
-                                io::ErrorKind::Other,
-                                format!("unsolicited reponse: {:?}", tag),
-                            )));
-                        }
+            if let Response::Done { status, tag, .. } = res.parsed() {
+                if let imap_proto::Status::Ok = status {
+                    if tag == &id {
+                        return Ok(());
                     } else {
                         return Err(Error::Io(io::Error::new(
                             io::ErrorKind::Other,
-                            format!("fail: {:?}", status),
+                            format!("unsolicited reponse: {:?}", tag),
                         )));
                     }
+                } else {
+                    return Err(Error::Io(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("fail: {:?}", status),
+                    )));
                 }
-                _ => {}
             }
         }
 
