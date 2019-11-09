@@ -987,7 +987,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Session<T> {
         &mut self,
         reference_name: Option<&str>,
         mailbox_pattern: Option<&str>,
-    ) -> Result<impl Stream<Item = Result<Name<'_>>>> {
+    ) -> Result<impl Stream<Item = Result<Name>> + '_> {
         let id = self
             .run_command(&format!(
                 "LIST {} {}",
@@ -1022,7 +1022,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Session<T> {
         &mut self,
         reference_name: Option<&str>,
         mailbox_pattern: Option<&str>,
-    ) -> Result<impl Stream<Item = Result<Name<'_>>>> {
+    ) -> Result<impl Stream<Item = Result<Name>> + '_> {
         let id = self
             .run_command(&format!(
                 "LSUB {} {}",
@@ -1267,7 +1267,8 @@ impl<T: Read + Write + Unpin + fmt::Debug> Session<T> {
 impl<T: Read + Write + Unpin + fmt::Debug> Connection<T> {
     unsafe_pinned!(stream: ConnStream<Framed<T, ImapCodec>>);
 
-    async fn read_response(&mut self) -> Option<ResponseData> {
+    /// Read the next response on the connection.
+    pub async fn read_response(&mut self) -> Option<ResponseData> {
         self.stream.next().await
     }
 

@@ -1,6 +1,8 @@
 use super::{Flag, Seq, Uid};
 use chrono::{DateTime, FixedOffset};
-use imap_proto::types::{AttributeValue, BodyStructure, Envelope, MessageSection, SectionPath};
+use imap_proto::types::{
+    AttributeValue, BodyStructure, Envelope, MessageSection, Response, SectionPath,
+};
 
 use crate::codec::ResponseData;
 
@@ -12,7 +14,6 @@ const DATE_TIME_FORMAT: &str = "%d-%b-%Y %H:%M:%S %z";
 rental! {
     pub mod rents {
         use super::*;
-        use crate::codec::ResponseData;
 
         #[rental(debug, covariant)]
         pub struct InnerFetch {
@@ -45,27 +46,30 @@ pub struct Fetch {
 
 impl Fetch {
     pub(crate) fn new(resp: ResponseData) -> Self {
-        assert!(resp.parsed().is_fetch());
         let ResponseData { raw, response } = resp;
 
-        let (message, attrs) = response.into_inner_fetch();
-        let mut uid = None;
-        let mut size = None;
+        match response {
+            Response::Fetch(message, attrs) => {
+                let mut uid = None;
+                let mut size = None;
 
-        let inner = InnerFetch::new(raw, |_data| attrs);
-        for attr in inner.suffix() {
-            match attr {
-                AttributeValue::Uid(id) => uid = Some(*id),
-                AttributeValue::Rfc822Size(sz) => size = Some(*sz),
-                _ => {}
+                let inner = InnerFetch::new(raw, |_data| attrs);
+                for attr in inner.suffix() {
+                    match attr {
+                        AttributeValue::Uid(id) => uid = Some(*id),
+                        AttributeValue::Rfc822Size(sz) => size = Some(*sz),
+                        _ => {}
+                    }
+                }
+
+                Fetch {
+                    message,
+                    uid,
+                    size,
+                    inner,
+                }
             }
-        }
-
-        Fetch {
-            message,
-            uid,
-            size,
-            inner,
+            _ => panic!("cannot create from non fetch response"),
         }
     }
 

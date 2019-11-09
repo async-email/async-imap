@@ -1,14 +1,29 @@
+use crate::codec::ResponseData;
 use std::borrow::Cow;
 
-/// A name that matches a `LIST` or `LSUB` command.
-#[derive(Debug, Eq, PartialEq)]
-pub struct Name<'a> {
-    // Note that none of these fields are *actually* 'static.
-    // Rather, they are tied to the lifetime of the `ZeroCopy` that contains this `Name`.
-    pub(crate) attributes: Vec<NameAttribute<'a>>,
-    pub(crate) delimiter: Option<String>,
-    pub(crate) name: String,
+use imap_proto::{MailboxDatum, Response};
+
+rental! {
+    pub mod rents {
+        use super::*;
+
+        /// A name that matches a `LIST` or `LSUB` command.
+        #[rental(debug, covariant)]
+        pub struct Name {
+            data: Vec<u8>,
+            inner: InnerName<'data>,
+        }
+    }
 }
+
+#[derive(PartialEq, Eq, Debug)]
+pub struct InnerName<'a> {
+    attributes: Vec<NameAttribute<'a>>,
+    delimiter: Option<&'a str>,
+    name: &'a str,
+}
+
+pub use rents::Name;
 
 /// An attribute set for an IMAP name.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -66,10 +81,27 @@ impl<'a> From<&'a str> for NameAttribute<'a> {
     }
 }
 
-impl Name<'_> {
+impl Name {
+    pub(crate) fn from_mailbox_data(resp: ResponseData) -> Self {
+        let ResponseData { raw, response } = resp;
+
+        match response {
+            Response::MailboxData(MailboxDatum::List {
+                flags,
+                delimiter,
+                name,
+            }) => Name::new(raw, |_data| InnerName {
+                attributes: flags.iter().map(|s| NameAttribute::from(*s)).collect(),
+                delimiter,
+                name,
+            }),
+            _ => panic!("cannot construct from non mailbox data"),
+        }
+    }
+
     /// Attributes of this name.
     pub fn attributes(&self) -> &[NameAttribute<'_>] {
-        &self.attributes[..]
+        &self.suffix().attributes[..]
     }
 
     /// The hierarchy delimiter is a character used to delimit levels of hierarchy in a mailbox
@@ -77,7 +109,7 @@ impl Name<'_> {
     /// of naming hierarchy.  All children of a top-level hierarchy node use the same
     /// separator character.  `None` means that no hierarchy exists; the name is a "flat" name.
     pub fn delimiter(&self) -> Option<&str> {
-        self.delimiter.as_ref().map(|s| s.as_str())
+        self.suffix().delimiter
     }
 
     /// The name represents an unambiguous left-to-right hierarchy, and are valid for use as a
@@ -85,6 +117,6 @@ impl Name<'_> {
     /// the name is also valid as an argument for commands, such as `SELECT`, that accept mailbox
     /// names.
     pub fn name(&self) -> &str {
-        self.name.as_str()
+        self.suffix().name
     }
 }

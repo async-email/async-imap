@@ -13,7 +13,7 @@ pub(crate) fn parse_names<'a, T: Stream<Item = ResponseData> + Unpin>(
     stream: &'a mut T,
     unsolicited: sync::Sender<UnsolicitedResponse>,
     command_tag: RequestId,
-) -> impl Stream<Item = Result<Name<'a>>> + 'a {
+) -> impl Stream<Item = Result<Name>> + 'a {
     use futures::StreamExt;
 
     StreamExt::filter_map(
@@ -26,18 +26,10 @@ pub(crate) fn parse_names<'a, T: Stream<Item = ResponseData> + Unpin>(
 
             async move {
                 match resp.parsed() {
-                    Response::MailboxData(MailboxDatum::List {
-                        flags,
-                        delimiter,
-                        name,
-                    }) => Some(Ok(Name {
-                        attributes: flags
-                            .iter()
-                            .map(|s| NameAttribute::from((*s).to_string()))
-                            .collect(),
-                        delimiter: (*delimiter).map(Into::into),
-                        name: (*name).into(),
-                    })),
+                    Response::MailboxData(MailboxDatum::List { .. }) => {
+                        let name = Name::from_mailbox_data(resp);
+                        Some(Ok(name))
+                    }
                     _resp => match handle_unilateral(&resp, unsolicited).await {
                         Some(resp) => match resp.parsed() {
                             Response::Fetch(..) => None,
@@ -394,7 +386,7 @@ mod tests {
 
         let id = RequestId("A0001".into());
         let names: Vec<_> = parse_names(&mut stream, send, id)
-            .collect::<Result<Vec<Name<'_>>>>()
+            .collect::<Result<Vec<Name>>>()
             .await
             .unwrap();
         assert!(recv.is_empty());
