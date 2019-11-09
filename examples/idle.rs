@@ -1,6 +1,8 @@
 use async_imap::error::{Error, Result};
+use async_std::prelude::*;
 use async_std::task;
 use std::env;
+use std::time::Duration;
 
 fn main() -> Result<()> {
     task::block_on(async {
@@ -9,13 +11,13 @@ fn main() -> Result<()> {
             eprintln!("need three arguments: imap-server login password");
             Err(Error::Bad("need three arguments".into()))
         } else {
-            perform_idle(&args[1], &args[2], &args[3]).await?;
+            fetch_and_idle(&args[1], &args[2], &args[3]).await?;
             Ok(())
         }
     })
 }
 
-async fn perform_idle(imap_server: &str, login: &str, password: &str) -> Result<()> {
+async fn fetch_and_idle(imap_server: &str, login: &str, password: &str) -> Result<()> {
     let tls = async_tls::TlsConnector::new();
 
     // we pass in the imap_server twice to check that the server's TLS
@@ -25,18 +27,42 @@ async fn perform_idle(imap_server: &str, login: &str, password: &str) -> Result<
 
     // the client we have here is unauthenticated.
     // to do anything useful with the e-mails, we need to log in
-    let mut imap_session = client.login(login, password).await.map_err(|e| e.0)?;
+    let mut session = client.login(login, password).await.map_err(|e| e.0)?;
     println!("** logged in a {}", login);
 
-    // we want to fetch the first email in the INBOX mailbox
-    imap_session.select("INBOX").await?;
+    // we want to fetch some messages from the INBOX
+    session.select("INBOX").await?;
     println!("** INBOX selected");
 
-    println!("** XXX TODO: implement idle call + readline from stdin to interrupt");
+    // fetch messages
+    let msg_stream = session.fetch("1:3", "(FLAGS BODY.PEEK[])").await?;
+    let msgs = msg_stream.collect::<Vec<_>>().await;
+    println!("** number of fetched msgs: {:?}", msgs.len());
+
+    // init idle session
+    println!("** initting idle");
+    let mut idle = session.idle();
+    idle.init().await?;
+
+    println!("** idle async wait");
+    let (idle_stream, interrupt) = idle.stream();
+
+    task::spawn(async move {
+        println!("** thread: waiting for 30s");
+        task::sleep(Duration::from_secs(30)).await;
+        println!("** thread: waited 30 secs, now interrupting idle");
+        drop(interrupt);
+    });
+
+    let idle_result = idle_stream.take(1).collect::<Vec<_>>().await;
+    println!("** idle msg: {:#?}", &idle_result);
+
+    // return the session after we are done with it
+    println!("** sending DONE");
+    let mut session = idle.done().await?;
 
     // be nice to the server and log out
-    println!("** Logging out");
-    imap_session.logout().await?;
-
+    println!("** logging out");
+    session.logout().await?;
     Ok(())
 }
