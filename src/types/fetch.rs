@@ -27,6 +27,7 @@ pub use rents::InnerFetch;
 /// An IMAP [`FETCH` response](https://tools.ietf.org/html/rfc3501#section-7.4.2) that contains
 /// data about a particular message. This response occurs as the result of a `FETCH` or `STORE`
 /// command, as well as by unilateral server decision (e.g., flag updates).
+#[derive(Debug)]
 pub struct Fetch {
     inner: InnerFetch,
     /// The ordinal number of this message in its containing mailbox.

@@ -22,10 +22,9 @@ is-it-maintained-open-issues = { repository = "dignifiedquire/async-imap" }
 default = []
 
 [dependencies]
-regex = "1.0"
 imap-proto = { version = "0.9.0", git = "https://github.com/dignifiedquire/tokio-imap", branch = "async-imap"}
 nom = "5.0"
-base64 = "0.10"
+base64 = "0.11"
 chrono = "0.4"
 lazy_static = "1.4"
 async-tls = { git = "https://github.com/async-rs/async-tls" }
