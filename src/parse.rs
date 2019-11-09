@@ -215,11 +215,11 @@ pub(crate) async fn parse_mailbox<T: Stream<Item = ResponseData> + Unpin>(
                 }
             }
             Response::MailboxData(m) => match m {
-                MailboxDatum::Status { mailbox, .. } => {
+                MailboxDatum::Status { mailbox, status } => {
                     unsolicited
                         .send(UnsolicitedResponse::Status {
                             mailbox: (*mailbox).into(),
-                            attributes: Vec::new(), // FIXME: status,
+                            attributes: status.to_vec(),
                         })
                         .await;
                 }
@@ -289,11 +289,11 @@ async fn handle_unilateral<'a>(
     unsolicited: sync::Sender<UnsolicitedResponse>,
 ) -> Option<&'a ResponseData> {
     match res.parsed() {
-        Response::MailboxData(MailboxDatum::Status { mailbox, .. }) => {
+        Response::MailboxData(MailboxDatum::Status { mailbox, status }) => {
             unsolicited
                 .send(UnsolicitedResponse::Status {
                     mailbox: (*mailbox).into(),
-                    attributes: Vec::new(), // status, FIXME
+                    attributes: status.to_vec(),
                 })
                 .await;
         }
@@ -499,7 +499,6 @@ mod tests {
     }
 
     #[async_attributes::test]
-    #[ignore]
     async fn parse_capabilities_w_unilateral() {
         let (send, recv) = sync::channel(10);
         let responses = input_stream(&vec![
@@ -535,7 +534,6 @@ mod tests {
     }
 
     #[async_attributes::test]
-    #[ignore]
     async fn parse_ids_w_unilateral() {
         let (send, recv) = sync::channel(10);
         let responses = input_stream(&vec![

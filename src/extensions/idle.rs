@@ -1,15 +1,16 @@
 //! Adds support for the IMAP IDLE command specificed in [RFC2177](https://tools.ietf.org/html/rfc2177).
 
+use std::fmt;
+use std::pin::Pin;
+
 use async_std::io::{self, Read, Write};
 use async_std::prelude::*;
 use async_std::stream::Stream;
 use futures::task::{Context, Poll};
 use imap_proto::{RequestId, Response};
-use std::fmt;
-use std::pin::Pin;
 
 use crate::client::Session;
-use crate::codec::{Request, ResponseData};
+use crate::codec::ResponseData;
 use crate::error::Result;
 
 /// `Handle` allows a client to block waiting for changes to the remote mailbox.
@@ -43,6 +44,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Stream for Handle<T> {
     }
 }
 
+/// A stream of server responses after sending `IDLE`. Created using [Handle::stream].
 #[derive(Debug)]
 #[must_use = "futures do nothing unless polled"]
 pub struct IdleStream<'a, St> {
@@ -54,7 +56,7 @@ impl<St: Unpin> Unpin for IdleStream<'_, St> {}
 impl<'a, St: Stream + Unpin> IdleStream<'a, St> {
     unsafe_pinned!(stream: &'a mut St);
 
-    pub fn new(stream: &'a mut St) -> Self {
+    pub(crate) fn new(stream: &'a mut St) -> Self {
         IdleStream { stream }
     }
 }
@@ -76,14 +78,21 @@ impl<St: Stream + Unpin> Stream for IdleStream<'_, St> {
 impl<T: Read + Write + Unpin + fmt::Debug> Handle<T> {
     unsafe_pinned!(session: Session<T>);
 
-    pub fn new(session: Session<T>) -> Handle<T> {
+    pub(crate) fn new(session: Session<T>) -> Handle<T> {
         Handle { session, id: None }
     }
 
+    /// Start listening to the server side resonses.
+    /// Must be called after [Handle::init].
     pub fn stream(&mut self) -> IdleStream<'_, Self> {
+        assert!(
+            self.id.is_some(),
+            "Cannot listen to response without starting IDLE"
+        );
         IdleStream::new(self)
     }
 
+    /// Initialise the idle connection by sending the `IDLE` command to the server.
     pub async fn init(&mut self) -> Result<()> {
         let id = self.session.run_command("IDLE").await?;
         self.id = Some(id);
@@ -102,7 +111,13 @@ impl<T: Read + Write + Unpin + fmt::Debug> Handle<T> {
         Err(io::Error::new(io::ErrorKind::ConnectionRefused, "").into())
     }
 
+    /// Signal that we want to exit the idle connection, by sending the `DONE`
+    /// command to the server.
     pub async fn done(mut self) -> Result<Session<T>> {
+        assert!(
+            self.id.is_some(),
+            "Cannot call DONE on a non initialized idle connection"
+        );
         self.session.run_command_untagged("DONE").await?;
         self.session
             .check_ok(self.id.expect("invalid setup"))

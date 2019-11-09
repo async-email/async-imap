@@ -16,30 +16,32 @@
 //! Below is a basic client example. See the `examples/` directory for more.
 //!
 //! ```no_run
-//! extern crate imap;
-//! extern crate native_tls;
+//! use async_std::prelude::*;
+//! use async_imap::error::Result;
 //!
-//! fn fetch_inbox_top() -> imap::error::Result<Option<String>> {
+//! async fn fetch_inbox_top() -> Result<Option<String>> {
 //!     let domain = "imap.example.com";
-//!     let tls = native_tls::TlsConnector::builder().build().unwrap();
+//!     let tls = async_tls::TlsConnector::new();
 //!
 //!     // we pass in the domain twice to check that the server's TLS
 //!     // certificate is valid for the domain we're connecting to.
-//!     let client = imap::connect((domain, 993), domain, &tls).unwrap();
+//!     let client = async_imap::connect((domain, 993), domain, &tls).await?;
 //!
 //!     // the client we have here is unauthenticated.
 //!     // to do anything useful with the e-mails, we need to log in
 //!     let mut imap_session = client
 //!         .login("me@example.com", "password")
+//!         .await
 //!         .map_err(|e| e.0)?;
 //!
 //!     // we want to fetch the first email in the INBOX mailbox
-//!     imap_session.select("INBOX")?;
+//!     imap_session.select("INBOX").await?;
 //!
 //!     // fetch message number 1 in this mailbox, along with its RFC822 field.
 //!     // RFC 822 dictates the format of the body of e-mails
-//!     let messages = imap_session.fetch("1", "RFC822")?;
-//!     let message = if let Some(m) = messages.iter().next() {
+//!     let messages_stream = imap_session.fetch("1", "RFC822").await?;
+//!     let messages: Vec<_> = messages_stream.collect::<Result<_>>().await?;
+//!     let message = if let Some(m) = messages.first() {
 //!         m
 //!     } else {
 //!         return Ok(None);
@@ -52,7 +54,7 @@
 //!         .to_string();
 //!
 //!     // be nice to the server and log out
-//!     imap_session.logout()?;
+//!     imap_session.logout().await?;
 //!
 //!     Ok(Some(body))
 //! }

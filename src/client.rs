@@ -118,14 +118,14 @@ impl<T: Read + Write + Unpin + fmt::Debug> DerefMut for Session<T> {
 /// # Examples
 ///
 /// ```no_run
-/// # extern crate native_tls;
-/// # extern crate imap;
-/// # use std::io;
-/// # use native_tls::TlsConnector;
-/// # fn main() {
-/// let tls = TlsConnector::builder().build().unwrap();
-/// let client = imap::connect(("imap.example.org", 993), "imap.example.org", &tls).unwrap();
-/// # }
+/// # fn main() -> async_imap::error::Result<()> {
+/// # async_std::task::block_on(async {
+///
+/// let tls = async_tls::TlsConnector::new();
+/// let client = async_imap::connect(("imap.example.org", 993), "imap.example.org", &tls).await?;
+///
+/// # Ok(())
+/// # }) }
 /// ```
 pub async fn connect<A: ToSocketAddrs, S: AsRef<str>>(
     addr: A,
@@ -204,29 +204,30 @@ impl<T: Read + Write + Unpin + fmt::Debug> Client<T> {
     /// prompting the user for credetials), ownership of the original `Client` needs to be
     /// transferred back to the caller.
     ///
-    /// ```rust,no_run
-    /// # extern crate imap;
-    /// # extern crate native_tls;
-    /// # use std::io;
-    /// # use native_tls::TlsConnector;
-    /// # fn main() {
-    /// # let tls_connector = TlsConnector::builder().build().unwrap();
-    /// let client = imap::connect(
+    /// ```no_run
+    /// # fn main() -> async_imap::error::Result<()> {
+    /// # async_std::task::block_on(async {
+    ///
+    /// let tls = async_tls::TlsConnector::new();
+    /// let client = async_imap::connect(
     ///     ("imap.example.org", 993),
     ///     "imap.example.org",
-    ///     &tls_connector).unwrap();
+    ///     &tls
+    /// ).await?;
     ///
-    /// match client.login("user", "pass") {
+    /// match client.login("user", "pass").await {
     ///     Ok(s) => {
     ///         // you are successfully authenticated!
     ///     },
     ///     Err((e, orig_client)) => {
     ///         eprintln!("error logging in: {}", e);
     ///         // prompt user and try again with orig_client here
-    ///         return;
+    ///         return Err(e);
     ///     }
     /// }
-    /// # }
+    ///
+    /// # Ok(())
+    /// # }) }
     /// ```
     pub async fn login<U: AsRef<str>, P: AsRef<str>>(
         mut self,
@@ -248,16 +249,12 @@ impl<T: Read + Write + Unpin + fmt::Debug> Client<T> {
     /// challenge.
     ///
     /// ```no_run
-    /// extern crate imap;
-    /// extern crate native_tls;
-    /// use native_tls::TlsConnector;
-    ///
     /// struct OAuth2 {
     ///     user: String,
     ///     access_token: String,
     /// }
     ///
-    /// impl imap::Authenticator for OAuth2 {
+    /// impl async_imap::Authenticator for OAuth2 {
     ///     type Response = String;
     ///     fn process(&self, _: &[u8]) -> Self::Response {
     ///         format!(
@@ -267,25 +264,29 @@ impl<T: Read + Write + Unpin + fmt::Debug> Client<T> {
     ///     }
     /// }
     ///
-    /// fn main() {
+    /// # fn main() -> async_imap::error::Result<()> {
+    /// # async_std::task::block_on(async {
+    ///
     ///     let auth = OAuth2 {
     ///         user: String::from("me@example.com"),
     ///         access_token: String::from("<access_token>"),
     ///     };
+    ///
     ///     let domain = "imap.example.com";
-    ///     let tls = TlsConnector::builder().build().unwrap();
-    ///     let client = imap::connect((domain, 993), domain, &tls).unwrap();
-    ///     match client.authenticate("XOAUTH2", &auth) {
+    ///     let tls = async_tls::TlsConnector::new();
+    ///     let client = async_imap::connect((domain, 993), domain, &tls).await?;
+    ///     match client.authenticate("XOAUTH2", &auth).await {
     ///         Ok(session) => {
     ///             // you are successfully authenticated!
     ///         },
-    ///         Err((e, orig_client)) => {
-    ///             eprintln!("error authenticating: {}", e);
+    ///         Err((err, orig_client)) => {
+    ///             eprintln!("error authenticating: {}", err);
     ///             // prompt user and try again with orig_client here
-    ///             return;
+    ///             return Err(err);
     ///         }
     ///     };
-    /// }
+    /// # Ok(())
+    /// # }) }
     /// ```
     pub async fn authenticate<A: Authenticator, S: AsRef<str>>(
         mut self,
@@ -786,13 +787,15 @@ impl<T: Read + Write + Unpin + fmt::Debug> Session<T> {
     ///
     /// Delete a message:
     ///
-    /// ```rust,no_run
-    /// # extern crate imap;
-    /// # use imap::{self, Session};
-    /// # use std::net::TcpStream;
-    /// fn delete(seq: imap::types::Seq, s: &mut Session<TcpStream>) -> imap::error::Result<()> {
-    ///     s.store(format!("{}", seq), "+FLAGS (\\Deleted)")?;
-    ///     s.expunge()?;
+    /// ```no_run
+    /// use async_imap::{types::Seq, Session, error::Result};
+    /// use async_std::prelude::*;
+    /// use async_std::net::TcpStream;
+    ///
+    /// async fn delete(seq: Seq, s: &mut Session<TcpStream>) -> Result<()> {
+    ///     let updates_stream = s.store(format!("{}", seq), "+FLAGS (\\Deleted)").await?;
+    ///     let _updates: Vec<_> = updates_stream.collect::<Result<_>>().await?;
+    ///     s.expunge().await?;
     ///     Ok(())
     /// }
     /// ```

@@ -1,13 +1,11 @@
 [package]
 name = "async-imap"
-version = "1.0.0"
-authors = ["dignifiedquire <me@dignifiedquire.com>",
-           "Matt McCoy <mattnenterprise@yahoo.com>",
-           "Jon Gjengset <jon@thesquareplanet.com>"]
-documentation = "https://docs.rs/imap/"
-repository = "https://github.com/jonhoo/rust-imap"
-homepage = "https://github.com/jonhoo/rust-imap"
-description = "IMAP client for Rust"
+version = "0.1.0"
+authors = ["dignifiedquire <me@dignifiedquire.com>"]
+documentation = "https://docs.rs/async-imap/"
+repository = "https://github.com/dignifiedquire/async-imap"
+homepage = "https://github.com/dignifiedquire/async-imap"
+description = "Async IMAP client for Rust"
 readme = "README.md"
 license = "Apache-2.0/MIT"
 edition = "2018"
@@ -17,8 +15,8 @@ categories = ["email", "network-programming"]
 
 [badges]
 maintenance = { status = "actively-developed" }
-is-it-maintained-issue-resolution = { repository = "jonhoo/rust-imap" }
-is-it-maintained-open-issues = { repository = "jonhoo/rust-imap" }
+is-it-maintained-issue-resolution = { repository = "dignifiedquire/async-imap" }
+is-it-maintained-open-issues = { repository = "dignifiedquire/async-imap" }
 
 [features]
 default = []

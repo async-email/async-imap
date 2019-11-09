@@ -5,10 +5,14 @@ use std::collections::HashSet;
 const IMAP4REV1_CAPABILITY: &str = "IMAP4rev1";
 const AUTH_CAPABILITY_PREFIX: &str = "AUTH=";
 
+/// List of available Capabilities.
 #[derive(Debug, Eq, PartialEq, Hash)]
 pub enum Capability {
+    /// The crucial imap capability.
     Imap4rev1,
+    /// Auth type capability.
     Auth(String),
+    /// Any other atoms.
     Atom(String),
 }
 

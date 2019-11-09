@@ -2,7 +2,6 @@ use std::cmp::min;
 use std::pin::Pin;
 
 use async_std::io::{Error, ErrorKind, Read, Result, Write};
-use async_std::prelude::*;
 use futures::task::{Context, Poll};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -86,18 +85,18 @@ impl Read for MockStream {
 impl Write for MockStream {
     fn poll_write(
         mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
+        _cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<Result<usize>> {
         self.written_buf.extend_from_slice(buf);
         Poll::Ready(Ok(buf.len()))
     }
 
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<()>> {
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<()>> {
         Poll::Ready(Ok(()))
     }
 
-    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<()>> {
+    fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<()>> {
         Poll::Ready(Ok(()))
     }
 }
