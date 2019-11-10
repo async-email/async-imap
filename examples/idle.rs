@@ -45,7 +45,7 @@ async fn fetch_and_idle(imap_server: &str, login: &str, password: &str) -> Resul
     idle.init().await?;
 
     println!("** idle async wait");
-    let (idle_stream, interrupt) = idle.stream();
+    let (idle_wait, interrupt) = idle.wait();
 
     task::spawn(async move {
         println!("** thread: waiting for 30s");
@@ -54,7 +54,7 @@ async fn fetch_and_idle(imap_server: &str, login: &str, password: &str) -> Resul
         drop(interrupt);
     });
 
-    let idle_result = idle_stream.take(1).collect::<Vec<_>>().await;
+    let idle_result = idle_wait.await;
     println!("** idle msg: {:#?}", &idle_result);
 
     // return the session after we are done with it
