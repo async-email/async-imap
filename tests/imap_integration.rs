@@ -323,18 +323,18 @@ fn idle() -> async_imap::error::Result<()> {
         let mut idle = session.idle();
         idle.init().await?;
 
-        let (idle_stream, interrupt) = idle.stream();
+        let (idle_wait, interrupt) = idle.wait_with_timeout(std::time::Duration::from_secs(30));
         println!("idle wait");
 
         task::spawn(async move {
             println!("waiting for 1s");
-            task::sleep(Duration::from_secs(1)).await;
+            task::sleep(Duration::from_secs(2)).await;
             println!("interrupting idle");
             drop(interrupt);
         });
 
-        let idle_result = idle_stream.take(1).collect::<Vec<_>>().await;
-        println!("idle msg: {:#?}", &idle_result);
+        let idle_result = idle_wait.await;
+        println!("idle result: {:#?}", &idle_result);
 
         // return the session after we are done with it
         let mut session = idle.done().await?;

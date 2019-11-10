@@ -2,6 +2,7 @@
 
 use std::fmt;
 use std::pin::Pin;
+use std::time::Duration;
 
 use async_std::io::{self, Read, Write};
 use async_std::prelude::*;
@@ -75,6 +76,17 @@ impl<St: Stream + Unpin> Stream for IdleStream<'_, St> {
     }
 }
 
+/// Possible responses that happen on an open idle connection.
+#[derive(Debug, PartialEq, Eq)]
+pub enum IdleResponse {
+    /// The manual interrupt was used to interrupt the idle connection..
+    ManualInterrupt,
+    /// The idle connection timed out, because of the user set timeout.
+    Timeout,
+    /// The server has indicated that some new action has happened.
+    NewData(ResponseData),
+}
+
 impl<T: Read + Write + Unpin + fmt::Debug> Handle<T> {
     unsafe_pinned!(session: Session<T>);
 
@@ -84,10 +96,10 @@ impl<T: Read + Write + Unpin + fmt::Debug> Handle<T> {
 
     /// Start listening to the server side resonses.
     /// Must be called after [Handle::init].
-    pub fn stream(
+    pub fn wait(
         &mut self,
     ) -> (
-        stop_token::StopStream<IdleStream<'_, Self>>,
+        impl Future<Output = IdleResponse> + '_,
         stop_token::StopSource,
     ) {
         assert!(
@@ -95,8 +107,52 @@ impl<T: Read + Write + Unpin + fmt::Debug> Handle<T> {
             "Cannot listen to response without starting IDLE"
         );
         let interrupt = stop_token::StopSource::new();
-        let stream = interrupt.stop_token().stop_stream(IdleStream::new(self));
-        (stream, interrupt)
+        let raw_stream = IdleStream::new(self);
+        let mut interruptible_stream = interrupt.stop_token().stop_stream(raw_stream);
+
+        let fut = async move {
+            while let Some(resp) = interruptible_stream.next().await {
+                println!("got idle response: {:#?}", resp.parsed());
+                match resp.parsed() {
+                    Response::Data { status, .. } if status == &Status::Ok => {
+                        // all good continue
+                    }
+                    Response::Continue { .. } => {
+                        // continuation, wait for it
+                    }
+                    _ => return IdleResponse::NewData(resp),
+                }
+            }
+
+            IdleResponse::Timeout
+        };
+
+        (fut, interrupt)
+    }
+
+    /// Start listening to the server side resonses, stops latest after the passed in `timeout`.
+    /// Must be called after [Handle::init].
+    pub fn wait_with_timeout(
+        &mut self,
+        timeout: Duration,
+    ) -> (
+        impl Future<Output = IdleResponse> + '_,
+        stop_token::StopSource,
+    ) {
+        assert!(
+            self.id.is_some(),
+            "Cannot listen to response without starting IDLE"
+        );
+
+        let (waiter, interrupt) = self.wait();
+        let fut = async move {
+            match async_std::future::timeout(timeout, async move { waiter.await }).await {
+                Ok(res) => res,
+                Err(_err) => IdleResponse::Timeout,
+            }
+        };
+
+        (fut, interrupt)
     }
 
     /// Initialise the idle connection by sending the `IDLE` command to the server.
