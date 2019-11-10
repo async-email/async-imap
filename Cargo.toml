@@ -34,7 +34,7 @@ bytes = "0.4.12"
 futures = "0.3.0"
 async-attributes = "1.1.0"
 rental = "0.5.5"
-stop-token = { version = "0.1.0", features = ["unstable"], git = "https://github.com/async-rs/stop-token" }
+stop-token = { version = "0.1.1", features = ["unstable"] }
 
 [dev-dependencies]
 lettre = "0.9"
