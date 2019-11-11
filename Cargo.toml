@@ -3,8 +3,8 @@ name = "async-imap"
 version = "0.1.0"
 authors = ["dignifiedquire <me@dignifiedquire.com>"]
 documentation = "https://docs.rs/async-imap/"
-repository = "https://github.com/dignifiedquire/async-imap"
-homepage = "https://github.com/dignifiedquire/async-imap"
+repository = "https://github.com/async-email/async-imap"
+homepage = "https://github.com/async-email/async-imap"
 description = "Async IMAP client for Rust"
 readme = "README.md"
 license = "Apache-2.0/MIT"
@@ -15,8 +15,8 @@ categories = ["email", "network-programming"]
 
 [badges]
 maintenance = { status = "actively-developed" }
-is-it-maintained-issue-resolution = { repository = "dignifiedquire/async-imap" }
-is-it-maintained-open-issues = { repository = "dignifiedquire/async-imap" }
+is-it-maintained-issue-resolution = { repository = "async-email/async-imap" }
+is-it-maintained-open-issues = { repository = "async-email/async-imap" }
 
 [features]
 default = []
@@ -27,7 +27,7 @@ nom = "5.0"
 base64 = "0.11"
 chrono = "0.4"
 async-tls = { git = "https://github.com/async-rs/async-tls" }
-async-std = { git = "https://github.com/async-rs/async-std", features = ["unstable"] }
+async-std = { version = "0.99.12", features = ["unstable"] }
 pin-utils = "0.1.0-alpha.4"
 futures_codec = "0.3"
 bytes = "0.4.12"
