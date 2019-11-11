@@ -23,6 +23,11 @@
     <img src="https://img.shields.io/badge/docs-latest-blue.svg?style=flat-square"
       alt="docs.rs docs" />
   </a>
+  <!-- CI -->
+  <a href="https://github.com/async-email/async-imap/actions">
+    <img src="https://github.com/async-email/async-imap/workflows/CI/badge.svg"
+      alt="CI status" />
+  </a>
 </div>
 
 <div align="center">
