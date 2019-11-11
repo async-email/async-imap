@@ -22,12 +22,12 @@ is-it-maintained-open-issues = { repository = "async-email/async-imap" }
 default = []
 
 [dependencies]
-imap-proto = { version = "0.9.0", git = "https://github.com/dignifiedquire/tokio-imap", branch = "async-imap"}
+imap-proto = { version = "0.9.0" }
 nom = "5.0"
 base64 = "0.11"
 chrono = "0.4"
 async-tls = { git = "https://github.com/async-rs/async-tls" }
-async-std = { version = "0.99.12", features = ["unstable"] }
+async-std = { git = "https://github.com/async-rs/async-std", features = ["unstable"] }
 pin-utils = "0.1.0-alpha.4"
 futures_codec = "0.3"
 bytes = "0.4.12"

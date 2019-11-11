@@ -30,7 +30,7 @@ pub(crate) fn parse_names<'a, T: Stream<Item = ResponseData> + Unpin>(
                         let name = Name::from_mailbox_data(resp);
                         Some(Ok(name))
                     }
-                    _resp => match handle_unilateral(&resp, unsolicited).await {
+                    _resp => match handle_unilateral(resp, unsolicited).await {
                         Some(resp) => match resp.parsed() {
                             Response::Fetch(..) => None,
                             resp => Some(Err(resp.into())),
@@ -61,7 +61,7 @@ pub(crate) fn parse_fetches<'a, T: Stream<Item = ResponseData> + Unpin>(
             async move {
                 match resp.parsed() {
                     Response::Fetch(..) => Some(Ok(Fetch::new(resp))),
-                    _ => match handle_unilateral(&resp, unsolicited).await {
+                    _ => match handle_unilateral(resp, unsolicited).await {
                         Some(resp) => match resp.parsed() {
                             Response::Fetch(..) => None,
                             resp => Some(Err(resp.into())),
@@ -92,7 +92,7 @@ pub(crate) fn parse_expunge<'a, T: Stream<Item = ResponseData> + Unpin>(
             async move {
                 match resp.parsed() {
                     Response::Expunge(id) => Some(Ok(*id)),
-                    _ => match handle_unilateral(&resp, unsolicited).await {
+                    _ => match handle_unilateral(resp, unsolicited).await {
                         Some(resp) => match resp.parsed() {
                             Response::Fetch(..) => None,
                             resp => Some(Err(resp.into())),
@@ -127,7 +127,7 @@ pub(crate) async fn parse_capabilities<'a, T: Stream<Item = ResponseData> + Unpi
                 }
             }
             _ => {
-                if let Some(resp) = handle_unilateral(&resp, unsolicited.clone()).await {
+                if let Some(resp) = handle_unilateral(resp, unsolicited.clone()).await {
                     return Err(resp.parsed().into());
                 }
             }
@@ -151,7 +151,7 @@ pub(crate) async fn parse_noop<T: Stream<Item = ResponseData> + Unpin>(
             let unsolicited = unsolicited.clone();
 
             async move {
-                if let Some(resp) = handle_unilateral(&resp, unsolicited).await {
+                if let Some(resp) = handle_unilateral(resp, unsolicited).await {
                     return Some(Err(resp.parsed().into()));
                 }
                 None
@@ -178,7 +178,8 @@ pub(crate) async fn parse_mailbox<T: Stream<Item = ResponseData> + Unpin>(
         .next()
         .await
     {
-        match resp.parsed() {
+        let ResponseData { response, .. } = resp;
+        match response {
             Response::Data { status, code, .. } => {
                 if let imap_proto::Status::Ok = status {
                 } else {
@@ -189,13 +190,13 @@ pub(crate) async fn parse_mailbox<T: Stream<Item = ResponseData> + Unpin>(
                 use imap_proto::ResponseCode;
                 match code {
                     Some(ResponseCode::UidValidity(uid)) => {
-                        mailbox.uid_validity = Some(*uid);
+                        mailbox.uid_validity = Some(uid);
                     }
                     Some(ResponseCode::UidNext(unext)) => {
-                        mailbox.uid_next = Some(*unext);
+                        mailbox.uid_next = Some(unext);
                     }
                     Some(ResponseCode::Unseen(n)) => {
-                        mailbox.unseen = Some(*n);
+                        mailbox.unseen = Some(n);
                     }
                     Some(ResponseCode::PermanentFlags(flags)) => {
                         mailbox
@@ -210,15 +211,15 @@ pub(crate) async fn parse_mailbox<T: Stream<Item = ResponseData> + Unpin>(
                     unsolicited
                         .send(UnsolicitedResponse::Status {
                             mailbox: (*mailbox).into(),
-                            attributes: status.to_vec(),
+                            attributes: status,
                         })
                         .await;
                 }
                 MailboxDatum::Exists(e) => {
-                    mailbox.exists = *e;
+                    mailbox.exists = e;
                 }
                 MailboxDatum::Recent(r) => {
-                    mailbox.recent = *r;
+                    mailbox.recent = r;
                 }
                 MailboxDatum::Flags(flags) => {
                     mailbox
@@ -226,13 +227,12 @@ pub(crate) async fn parse_mailbox<T: Stream<Item = ResponseData> + Unpin>(
                         .extend(flags.iter().map(|s| (*s).to_string()).map(Flag::from));
                 }
                 MailboxDatum::List { .. } => {}
-                _ => {}
             },
             Response::Expunge(n) => {
-                unsolicited.send(UnsolicitedResponse::Expunge(*n)).await;
+                unsolicited.send(UnsolicitedResponse::Expunge(n)).await;
             }
             _ => {
-                return Err(resp.parsed().into());
+                return Err((&response).into());
             }
         }
     }
@@ -262,7 +262,7 @@ pub(crate) async fn parse_ids<T: Stream<Item = ResponseData> + Unpin>(
                 }
             }
             _ => {
-                if let Some(resp) = handle_unilateral(&resp, unsolicited.clone()).await {
+                if let Some(resp) = handle_unilateral(resp, unsolicited.clone()).await {
                     return Err(resp.parsed().into());
                 }
             }
@@ -274,30 +274,32 @@ pub(crate) async fn parse_ids<T: Stream<Item = ResponseData> + Unpin>(
 
 // check if this is simply a unilateral server response
 // (see Section 7 of RFC 3501):
-async fn handle_unilateral<'a>(
-    res: &'a ResponseData,
+async fn handle_unilateral(
+    res: ResponseData,
     unsolicited: sync::Sender<UnsolicitedResponse>,
-) -> Option<&'a ResponseData> {
-    match res.parsed() {
+) -> Option<ResponseData> {
+    let ResponseData { raw, response } = res;
+
+    match response {
         Response::MailboxData(MailboxDatum::Status { mailbox, status }) => {
             unsolicited
                 .send(UnsolicitedResponse::Status {
                     mailbox: (*mailbox).into(),
-                    attributes: status.to_vec(),
+                    attributes: status,
                 })
                 .await;
         }
         Response::MailboxData(MailboxDatum::Recent(n)) => {
-            unsolicited.send(UnsolicitedResponse::Recent(*n)).await;
+            unsolicited.send(UnsolicitedResponse::Recent(n)).await;
         }
         Response::MailboxData(MailboxDatum::Exists(n)) => {
-            unsolicited.send(UnsolicitedResponse::Exists(*n)).await;
+            unsolicited.send(UnsolicitedResponse::Exists(n)).await;
         }
         Response::Expunge(n) => {
-            unsolicited.send(UnsolicitedResponse::Expunge(*n)).await;
+            unsolicited.send(UnsolicitedResponse::Expunge(n)).await;
         }
-        _res => {
-            return Some(res);
+        _ => {
+            return Some(ResponseData { raw, response });
         }
     }
     None
