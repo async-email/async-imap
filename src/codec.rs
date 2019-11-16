@@ -62,11 +62,16 @@ impl<'a> Decoder for ImapCodec {
 impl Encoder for ImapCodec {
     type Item = Request;
     type Error = io::Error;
+
     fn encode(&mut self, msg: Self::Item, dst: &mut BytesMut) -> Result<(), io::Error> {
         if let Some(tag) = msg.0 {
+            // grow the buffer, as it does not grow automatically
+            dst.reserve(tag.as_bytes().len() + 1);
             dst.put(tag.as_bytes());
             dst.put(b' ');
         }
+        // grow the buffer, as it does not grow automatically
+        dst.reserve(msg.1.len() + 2);
         dst.put(&msg.1);
         dst.put("\r\n");
         Ok(())
