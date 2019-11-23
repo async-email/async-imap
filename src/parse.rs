@@ -227,6 +227,8 @@ pub(crate) async fn parse_mailbox<T: Stream<Item = ResponseData> + Unpin>(
                         .extend(flags.iter().map(|s| (*s).to_string()).map(Flag::from));
                 }
                 MailboxDatum::List { .. } => {}
+                MailboxDatum::MetadataSolicited { .. } => {}
+                MailboxDatum::MetadataUnsolicited { .. } => {}
             },
             Response::Expunge(n) => {
                 unsolicited.send(UnsolicitedResponse::Expunge(n)).await;
