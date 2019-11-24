@@ -12,7 +12,9 @@ use crate::codec::ResponseData;
 const DATE_TIME_FORMAT: &str = "%d-%b-%Y %H:%M:%S %z";
 
 rental! {
+    #[allow(clippy::all)]
     pub mod rents {
+
         use super::*;
 
         #[rental(debug, covariant)]
