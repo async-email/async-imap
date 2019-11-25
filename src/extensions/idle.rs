@@ -179,19 +179,15 @@ impl<T: Read + Write + Unpin + fmt::Debug> Handle<T> {
                         if let Status::Bad = status {
                             return Err(io::Error::new(
                                 io::ErrorKind::ConnectionRefused,
-                                information.as_ref().unwrap().to_string(),
+                                information.unwrap().to_string(),
                             )
                             .into());
                         }
                     }
-                    eprintln!(
-                        "unexpected done response {:?} {:?} {:?}",
-                        tag, status, information
-                    );
+                    handle_unilateral(res, self.session.unsolicited_responses_tx.clone()).await;
                 }
-                v => {
-                    // TODO: send through unhandled responses
-                    eprintln!("unexpected response {:?}", v);
+                _ => {
+                    handle_unilateral(res, self.session.unsolicited_responses_tx.clone()).await;
                 }
             }
         }
