@@ -37,8 +37,8 @@ macro_rules! quote {
 // primitives type.
 #[derive(Debug)]
 pub struct Session<T: Read + Write + Unpin + fmt::Debug> {
-    conn: Connection<T>,
-    unsolicited_responses_tx: sync::Sender<UnsolicitedResponse>,
+    pub(crate) conn: Connection<T>,
+    pub(crate) unsolicited_responses_tx: sync::Sender<UnsolicitedResponse>,
 
     /// Server responses that are not related to the current command. See also the note on
     /// [unilateral server responses in RFC 3501](https://tools.ietf.org/html/rfc3501#section-7).
@@ -151,7 +151,7 @@ impl Client<TcpStream> {
         domain: S,
         ssl_connector: &TlsConnector,
     ) -> Result<Client<TlsStream<TcpStream>>> {
-        self.run_command_and_check_ok("STARTTLS").await?;
+        self.run_command_and_check_ok("STARTTLS", None).await?;
         let ssl_stream = ssl_connector
             .connect(domain.as_ref(), self.conn.stream.into_inner().release().0)?
             .await?;
@@ -237,7 +237,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Client<T> {
         let u = ok_or_unauth_client_err!(validate_str(username.as_ref()), self);
         let p = ok_or_unauth_client_err!(validate_str(password.as_ref()), self);
         ok_or_unauth_client_err!(
-            self.run_command_and_check_ok(&format!("LOGIN {} {}", u, p))
+            self.run_command_and_check_ok(&format!("LOGIN {} {}", u, p), None)
                 .await,
             self
         );
@@ -1239,7 +1239,12 @@ impl<T: Read + Write + Unpin + fmt::Debug> Session<T> {
     // these are only here because they are public interface, the rest is in `Connection`
     /// Runs a command and checks if it returns OK.
     pub async fn run_command_and_check_ok<S: AsRef<str>>(&mut self, command: S) -> Result<()> {
-        self.conn.run_command_and_check_ok(command.as_ref()).await?;
+        self.conn
+            .run_command_and_check_ok(
+                command.as_ref(),
+                Some(self.unsolicited_responses_tx.clone()),
+            )
+            .await?;
 
         Ok(())
     }
@@ -1290,25 +1295,33 @@ impl<T: Read + Write + Unpin + fmt::Debug> Connection<T> {
     }
 
     /// Execute a command and check that the next response is a matching done.
-    pub(crate) async fn run_command_and_check_ok(&mut self, command: &str) -> Result<()> {
+    pub(crate) async fn run_command_and_check_ok(
+        &mut self,
+        command: &str,
+        unsolicited: Option<sync::Sender<UnsolicitedResponse>>,
+    ) -> Result<()> {
         let id = self.run_command(command).await?;
-        self.check_ok(id).await?;
+        self.check_ok(id, unsolicited).await?;
 
         Ok(())
     }
 
-    pub(crate) async fn check_ok(&mut self, id: RequestId) -> Result<()> {
+    pub(crate) async fn check_ok(
+        &mut self,
+        id: RequestId,
+        unsolicited: Option<sync::Sender<UnsolicitedResponse>>,
+    ) -> Result<()> {
         while let Some(res) = self.stream.next().await {
             if let Response::Done { status, tag, .. } = res.parsed() {
-                if let imap_proto::Status::Ok = status {
-                    if tag == &id {
-                        return Ok(());
-                    } else {
-                        return Err(Error::Io(io::Error::new(
-                            io::ErrorKind::Other,
-                            format!("unsolicited reponse: {:?}", tag),
-                        )));
+                if tag != &id {
+                    if let Some(unsolicited) = unsolicited.clone() {
+                        handle_unilateral(res, unsolicited).await;
                     }
+                    continue;
+                }
+
+                if let imap_proto::Status::Ok = status {
+                    return Ok(());
                 } else {
                     return Err(Error::Io(io::Error::new(
                         io::ErrorKind::Other,
@@ -1670,6 +1683,23 @@ mod tests {
     #[async_attributes::test]
     async fn uid_search() {
         let response = b"* SEARCH 1 2 3 4 5\r\n\
+            A0001 OK Search completed\r\n"
+            .to_vec();
+        let mock_stream = MockStream::new(response);
+        let mut session = mock_session!(mock_stream);
+        let ids = session.uid_search("Unseen").await.unwrap();
+        let ids: HashSet<Uid> = ids.iter().cloned().collect();
+        assert!(
+            session.stream.stream.written_buf == b"A0001 UID SEARCH Unseen\r\n".to_vec(),
+            "Invalid search command"
+        );
+        assert_eq!(ids, [1, 2, 3, 4, 5].iter().cloned().collect());
+    }
+
+    #[async_attributes::test]
+    async fn uid_search_unordered() {
+        let response = b"* SEARCH 1 2 3 4 5\r\n\
+            A0002 OK CAPABILITY completed\r\n\
             A0001 OK Search completed\r\n"
             .to_vec();
         let mock_stream = MockStream::new(response);

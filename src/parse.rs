@@ -5,7 +5,7 @@ use async_std::prelude::*;
 use async_std::stream::Stream;
 use async_std::sync;
 
-use super::error::Result;
+use super::error::{Error, Result};
 use super::types::*;
 use crate::codec::ResponseData;
 
@@ -30,13 +30,10 @@ pub(crate) fn parse_names<'a, T: Stream<Item = ResponseData> + Unpin>(
                         let name = Name::from_mailbox_data(resp);
                         Some(Ok(name))
                     }
-                    _resp => match handle_unilateral(resp, unsolicited).await {
-                        Some(resp) => match resp.parsed() {
-                            Response::Fetch(..) => None,
-                            resp => Some(Err(resp.into())),
-                        },
-                        None => None,
-                    },
+                    _ => {
+                        handle_unilateral(resp, unsolicited).await;
+                        None
+                    }
                 }
             }
         },
@@ -61,13 +58,10 @@ pub(crate) fn parse_fetches<'a, T: Stream<Item = ResponseData> + Unpin>(
             async move {
                 match resp.parsed() {
                     Response::Fetch(..) => Some(Ok(Fetch::new(resp))),
-                    _ => match handle_unilateral(resp, unsolicited).await {
-                        Some(resp) => match resp.parsed() {
-                            Response::Fetch(..) => None,
-                            resp => Some(Err(resp.into())),
-                        },
-                        None => None,
-                    },
+                    _ => {
+                        handle_unilateral(resp, unsolicited).await;
+                        None
+                    }
                 }
             }
         },
@@ -92,13 +86,10 @@ pub(crate) fn parse_expunge<'a, T: Stream<Item = ResponseData> + Unpin>(
             async move {
                 match resp.parsed() {
                     Response::Expunge(id) => Some(Ok(*id)),
-                    _ => match handle_unilateral(resp, unsolicited).await {
-                        Some(resp) => match resp.parsed() {
-                            Response::Fetch(..) => None,
-                            resp => Some(Err(resp.into())),
-                        },
-                        None => None,
-                    },
+                    _ => {
+                        handle_unilateral(resp, unsolicited).await;
+                        None
+                    }
                 }
             }
         },
@@ -127,9 +118,7 @@ pub(crate) async fn parse_capabilities<'a, T: Stream<Item = ResponseData> + Unpi
                 }
             }
             _ => {
-                if let Some(resp) = handle_unilateral(resp, unsolicited.clone()).await {
-                    return Err(resp.parsed().into());
-                }
+                handle_unilateral(resp, unsolicited.clone()).await;
             }
         }
     }
@@ -151,9 +140,7 @@ pub(crate) async fn parse_noop<T: Stream<Item = ResponseData> + Unpin>(
             let unsolicited = unsolicited.clone();
 
             async move {
-                if let Some(resp) = handle_unilateral(resp, unsolicited).await {
-                    return Some(Err(resp.parsed().into()));
-                }
+                handle_unilateral(resp, unsolicited).await;
                 None
             }
         },
@@ -178,13 +165,19 @@ pub(crate) async fn parse_mailbox<T: Stream<Item = ResponseData> + Unpin>(
         .next()
         .await
     {
-        let ResponseData { response, .. } = resp;
+        let ResponseData { response, raw } = resp;
         match response {
-            Response::Data { status, code, .. } => {
+            Response::Data {
+                status,
+                code,
+                information,
+            } => {
                 if let imap_proto::Status::Ok = status {
                 } else {
-                    // how can this happen for a Response::Data?
-                    unreachable!();
+                    return Err(Error::Bad(format!(
+                        "status: {:?}, code: {:?}, info: {:?}",
+                        status, code, information
+                    )));
                 }
 
                 use imap_proto::ResponseCode;
@@ -234,7 +227,7 @@ pub(crate) async fn parse_mailbox<T: Stream<Item = ResponseData> + Unpin>(
                 unsolicited.send(UnsolicitedResponse::Expunge(n)).await;
             }
             _ => {
-                return Err((&response).into());
+                handle_unilateral(ResponseData { response, raw }, unsolicited.clone()).await;
             }
         }
     }
@@ -264,9 +257,7 @@ pub(crate) async fn parse_ids<T: Stream<Item = ResponseData> + Unpin>(
                 }
             }
             _ => {
-                if let Some(resp) = handle_unilateral(resp, unsolicited.clone()).await {
-                    return Err(resp.parsed().into());
-                }
+                handle_unilateral(resp, unsolicited.clone()).await;
             }
         }
     }
@@ -276,10 +267,10 @@ pub(crate) async fn parse_ids<T: Stream<Item = ResponseData> + Unpin>(
 
 // check if this is simply a unilateral server response
 // (see Section 7 of RFC 3501):
-async fn handle_unilateral(
+pub(crate) async fn handle_unilateral(
     res: ResponseData,
     unsolicited: sync::Sender<UnsolicitedResponse>,
-) -> Option<ResponseData> {
+) {
     let ResponseData { raw, response } = res;
 
     match response {
@@ -301,10 +292,11 @@ async fn handle_unilateral(
             unsolicited.send(UnsolicitedResponse::Expunge(n)).await;
         }
         _ => {
-            return Some(ResponseData { raw, response });
+            unsolicited
+                .send(UnsolicitedResponse::Other(ResponseData { raw, response }))
+                .await;
         }
     }
-    None
 }
 
 #[cfg(test)]
