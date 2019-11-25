@@ -1312,21 +1312,46 @@ impl<T: Read + Write + Unpin + fmt::Debug> Connection<T> {
         unsolicited: Option<sync::Sender<UnsolicitedResponse>>,
     ) -> Result<()> {
         while let Some(res) = self.stream.next().await {
-            if let Response::Done { status, tag, .. } = res.parsed() {
-                if tag != &id {
-                    if let Some(unsolicited) = unsolicited.clone() {
-                        handle_unilateral(res, unsolicited).await;
-                    }
-                    continue;
-                }
+            if let Response::Done {
+                status,
+                code,
+                information,
+                tag,
+            } = res.parsed()
+            {
+                use imap_proto::Status;
+                match status {
+                    Status::Ok => {
+                        if tag != &id {
+                            if let Some(unsolicited) = unsolicited.clone() {
+                                handle_unilateral(res, unsolicited).await;
+                            }
+                            continue;
+                        }
 
-                if let imap_proto::Status::Ok = status {
-                    return Ok(());
-                } else {
-                    return Err(Error::Io(io::Error::new(
-                        io::ErrorKind::Other,
-                        format!("fail: {:?}", status),
-                    )));
+                        return Ok(());
+                    }
+                    Status::Bad => {
+                        return Err(Error::Bad(format!(
+                            "code: {:?}, info: {:?}",
+                            code, information
+                        )))
+                    }
+                    Status::No => {
+                        return Err(Error::No(format!(
+                            "code: {:?}, info: {:?}",
+                            code, information
+                        )))
+                    }
+                    _ => {
+                        return Err(Error::Io(io::Error::new(
+                            io::ErrorKind::Other,
+                            format!(
+                                "status: {:?}, code: {:?}, information: {:?}",
+                                status, code, information
+                            ),
+                        )));
+                    }
                 }
             }
         }

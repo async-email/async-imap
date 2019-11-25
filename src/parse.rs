@@ -1,9 +1,10 @@
-use imap_proto::{self, MailboxDatum, RequestId, Response};
 use std::collections::HashSet;
 
+use async_std::io;
 use async_std::prelude::*;
 use async_std::stream::Stream;
 use async_std::sync;
+use imap_proto::{self, MailboxDatum, RequestId, Response};
 
 use super::error::{Error, Result};
 use super::types::*;
@@ -172,31 +173,50 @@ pub(crate) async fn parse_mailbox<T: Stream<Item = ResponseData> + Unpin>(
                 code,
                 information,
             } => {
-                if let imap_proto::Status::Ok = status {
-                } else {
-                    return Err(Error::Bad(format!(
-                        "status: {:?}, code: {:?}, info: {:?}",
-                        status, code, information
-                    )));
-                }
+                use imap_proto::Status;
 
-                use imap_proto::ResponseCode;
-                match code {
-                    Some(ResponseCode::UidValidity(uid)) => {
-                        mailbox.uid_validity = Some(uid);
+                match status {
+                    Status::Ok => {
+                        use imap_proto::ResponseCode;
+                        match code {
+                            Some(ResponseCode::UidValidity(uid)) => {
+                                mailbox.uid_validity = Some(uid);
+                            }
+                            Some(ResponseCode::UidNext(unext)) => {
+                                mailbox.uid_next = Some(unext);
+                            }
+                            Some(ResponseCode::Unseen(n)) => {
+                                mailbox.unseen = Some(n);
+                            }
+                            Some(ResponseCode::PermanentFlags(flags)) => {
+                                mailbox
+                                    .permanent_flags
+                                    .extend(flags.iter().map(|s| (*s).to_string()).map(Flag::from));
+                            }
+                            _ => {}
+                        }
                     }
-                    Some(ResponseCode::UidNext(unext)) => {
-                        mailbox.uid_next = Some(unext);
+                    Status::Bad => {
+                        return Err(Error::Bad(format!(
+                            "code: {:?}, info: {:?}",
+                            code, information
+                        )))
                     }
-                    Some(ResponseCode::Unseen(n)) => {
-                        mailbox.unseen = Some(n);
+                    Status::No => {
+                        return Err(Error::No(format!(
+                            "code: {:?}, info: {:?}",
+                            code, information
+                        )))
                     }
-                    Some(ResponseCode::PermanentFlags(flags)) => {
-                        mailbox
-                            .permanent_flags
-                            .extend(flags.iter().map(|s| (*s).to_string()).map(Flag::from));
+                    _ => {
+                        return Err(Error::Io(io::Error::new(
+                            io::ErrorKind::Other,
+                            format!(
+                                "status: {:?}, code: {:?}, information: {:?}",
+                                status, code, information
+                            ),
+                        )));
                     }
-                    _ => {}
                 }
             }
             Response::MailboxData(m) => match m {
