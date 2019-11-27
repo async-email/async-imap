@@ -31,31 +31,43 @@ impl<'a> Decoder for ImapCodec {
             return Ok(None);
         }
 
-        let (response, rsp_len) = match imap_proto::parse_response(buf) {
-            Ok((remaining, response)) => {
-                // This SHOULD be acceptable/safe: BytesMut storage memory is
-                // allocated on the heap and should not move. It will not be
-                // freed as long as we keep a reference alive, which we do
-                // by retaining a reference to the split buffer, below.
-                let response = unsafe { std::mem::transmute(response) };
-                (response, buf.len() - remaining.len())
-            }
-            Err(nom::Err::Incomplete(Needed::Size(min))) => {
-                self.decode_need_message_bytes = min;
-                return Ok(None);
-            }
-            Err(nom::Err::Incomplete(_)) => return Ok(None),
-            Err(err) => {
-                return Err(io::Error::new(
+        // This is not efficient, but we accept this for now.
+        // TODO: eventually improve on this
+        let mut buf_vec = buf.to_vec();
+
+        enum CreateError {
+            None,
+            Error(io::Error),
+        }
+
+        match ResponseData::try_new(buf_vec, |buf_vec| {
+            let res = imap_proto::parse_response(&buf_vec);
+            match res {
+                Ok((remaining, response)) => {
+                    let len = buf.len() - remaining.len();
+                    // buf_vec.truncate(len);
+                    Ok(response)
+                }
+                Err(nom::Err::Incomplete(Needed::Size(min))) => {
+                    self.decode_need_message_bytes = min;
+                    Err(CreateError::None)
+                }
+                Err(nom::Err::Incomplete(_)) => Err(CreateError::None),
+                Err(err) => Err(CreateError::Error(io::Error::new(
                     io::ErrorKind::Other,
                     format!("{:?} during parsing of {:?}", err, buf),
-                ))
+                ))),
             }
-        };
-
-        let raw = buf.split_to(rsp_len).freeze().to_vec();
-        self.decode_need_message_bytes = 0;
-        Ok(Some(ResponseData { raw, response }))
+        }) {
+            Ok(response) => {
+                self.decode_need_message_bytes = 0;
+                Ok(Some(response))
+            }
+            Err(err) => match err {
+                rental::RentalError(CreateError::None, _) => Ok(None),
+                rental::RentalError(CreateError::Error(err), _) => Err(err),
+            },
+        }
     }
 }
 
@@ -78,42 +90,42 @@ impl Encoder for ImapCodec {
     }
 }
 
-// TODO: use rental for this
-#[derive(Debug, PartialEq, Eq)]
-pub struct ResponseData {
-    pub raw: Vec<u8>,
-    // This reference is really scoped to the lifetime of the `raw`
-    // member, but unfortunately Rust does not allow that yet. It
-    // is transmuted to `'static` by the `Decoder`, instead, and
-    // references returned to callers of `ResponseData` are limited
-    // to the lifetime of the `ResponseData` struct.
-    //
-    // `raw` is never mutated during the lifetime of `ResponseData`,
-    // and `Response` does not not implement any specific drop glue.
-    pub response: Response<'static>,
-}
+rental! {
+    pub mod rents {
+        use super::*;
 
-impl Deref for ResponseData {
-    type Target = Response<'static>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.response
+        #[rental(debug, covariant)]
+        pub struct ResponseData {
+            raw: Vec<u8>,
+            response: Response<'raw>,
+        }
     }
 }
 
+impl PartialEq for ResponseData {
+    fn eq(&self, other: &Self) -> bool {
+        self.head() == other.head()
+    }
+}
+
+impl Eq for ResponseData {}
+
+pub use rents::ResponseData;
+
 impl ResponseData {
     pub fn request_id(&self) -> Option<&RequestId> {
-        match self.response {
+        match self.suffix() {
             Response::Done { ref tag, .. } => Some(tag),
             _ => None,
         }
     }
+
     pub fn parsed(&self) -> &Response<'_> {
-        &self.response
+        self.suffix()
     }
 
     pub fn into_inner(self) -> Vec<u8> {
-        self.raw
+        self.into_head()
     }
 }
 

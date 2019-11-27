@@ -48,14 +48,16 @@ pub struct Fetch {
 
 impl Fetch {
     pub(crate) fn new(resp: ResponseData) -> Self {
-        let ResponseData { raw, response } = resp;
+        // let ResponseData { raw, response } = resp;
 
-        match response {
+        match resp.parsed() {
             Response::Fetch(message, attrs) => {
                 let mut uid = None;
                 let mut size = None;
 
-                let inner = InnerFetch::new(raw, |_data| attrs);
+                let message = *message;
+                let inner =
+                    InnerFetch::new(resp.into_inner(), |_data| vec![] /* FIXME: attrs */);
                 for attr in inner.suffix() {
                     match attr {
                         AttributeValue::Uid(id) => uid = Some(*id),

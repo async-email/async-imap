@@ -166,8 +166,7 @@ pub(crate) async fn parse_mailbox<T: Stream<Item = ResponseData> + Unpin>(
         .next()
         .await
     {
-        let ResponseData { response, raw } = resp;
-        match response {
+        match resp.parsed() {
             Response::Data {
                 status,
                 code,
@@ -180,13 +179,13 @@ pub(crate) async fn parse_mailbox<T: Stream<Item = ResponseData> + Unpin>(
                         use imap_proto::ResponseCode;
                         match code {
                             Some(ResponseCode::UidValidity(uid)) => {
-                                mailbox.uid_validity = Some(uid);
+                                mailbox.uid_validity = Some(*uid);
                             }
                             Some(ResponseCode::UidNext(unext)) => {
-                                mailbox.uid_next = Some(unext);
+                                mailbox.uid_next = Some(*unext);
                             }
                             Some(ResponseCode::Unseen(n)) => {
-                                mailbox.unseen = Some(n);
+                                mailbox.unseen = Some(*n);
                             }
                             Some(ResponseCode::PermanentFlags(flags)) => {
                                 mailbox
@@ -224,15 +223,15 @@ pub(crate) async fn parse_mailbox<T: Stream<Item = ResponseData> + Unpin>(
                     unsolicited
                         .send(UnsolicitedResponse::Status {
                             mailbox: (*mailbox).into(),
-                            attributes: status,
+                            attributes: vec![], // FIXME status.to_vec(),
                         })
                         .await;
                 }
                 MailboxDatum::Exists(e) => {
-                    mailbox.exists = e;
+                    mailbox.exists = *e;
                 }
                 MailboxDatum::Recent(r) => {
-                    mailbox.recent = r;
+                    mailbox.recent = *r;
                 }
                 MailboxDatum::Flags(flags) => {
                     mailbox
@@ -244,10 +243,10 @@ pub(crate) async fn parse_mailbox<T: Stream<Item = ResponseData> + Unpin>(
                 MailboxDatum::MetadataUnsolicited { .. } => {}
             },
             Response::Expunge(n) => {
-                unsolicited.send(UnsolicitedResponse::Expunge(n)).await;
+                unsolicited.send(UnsolicitedResponse::Expunge(*n)).await;
             }
             _ => {
-                handle_unilateral(ResponseData { response, raw }, unsolicited.clone()).await;
+                handle_unilateral(resp, unsolicited.clone()).await;
             }
         }
     }
@@ -291,30 +290,28 @@ pub(crate) async fn handle_unilateral(
     res: ResponseData,
     unsolicited: sync::Sender<UnsolicitedResponse>,
 ) {
-    let ResponseData { raw, response } = res;
+    // let ResponseData { raw, response } = res;
 
-    match response {
+    match res.parsed() {
         Response::MailboxData(MailboxDatum::Status { mailbox, status }) => {
             unsolicited
                 .send(UnsolicitedResponse::Status {
                     mailbox: (*mailbox).into(),
-                    attributes: status,
+                    attributes: vec![], // FIXME status,
                 })
                 .await;
         }
         Response::MailboxData(MailboxDatum::Recent(n)) => {
-            unsolicited.send(UnsolicitedResponse::Recent(n)).await;
+            unsolicited.send(UnsolicitedResponse::Recent(*n)).await;
         }
         Response::MailboxData(MailboxDatum::Exists(n)) => {
-            unsolicited.send(UnsolicitedResponse::Exists(n)).await;
+            unsolicited.send(UnsolicitedResponse::Exists(*n)).await;
         }
         Response::Expunge(n) => {
-            unsolicited.send(UnsolicitedResponse::Expunge(n)).await;
+            unsolicited.send(UnsolicitedResponse::Expunge(*n)).await;
         }
         _ => {
-            unsolicited
-                .send(UnsolicitedResponse::Other(ResponseData { raw, response }))
-                .await;
+            unsolicited.send(UnsolicitedResponse::Other(res)).await;
         }
     }
 }
@@ -325,17 +322,17 @@ mod tests {
 
     fn input_stream(data: &[&str]) -> Vec<ResponseData> {
         data.iter()
-            .map(|line| match imap_proto::parse_response(line.as_bytes()) {
-                Ok((remaining, response)) => {
-                    let response = unsafe { std::mem::transmute(response) };
-                    assert_eq!(remaining.len(), 0);
+            .map(|line| {
+                ResponseData::new(line.as_bytes().to_vec().into(), |line| {
+                    match imap_proto::parse_response(line) {
+                        Ok((remaining, response)) => {
+                            assert_eq!(remaining.len(), 0);
 
-                    ResponseData {
-                        raw: line.as_bytes().to_vec().into(),
-                        response,
+                            response
+                        }
+                        Err(err) => panic!("invalid input: {:?}", err),
                     }
-                }
-                Err(err) => panic!("invalid input: {:?}", err),
+                })
             })
             .collect()
     }
