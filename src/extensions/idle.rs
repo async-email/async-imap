@@ -13,6 +13,7 @@ use imap_proto::{RequestId, Response, Status};
 use crate::client::Session;
 use crate::codec::ResponseData;
 use crate::error::Result;
+use crate::parse::handle_unilateral;
 
 /// `Handle` allows a client to block waiting for changes to the remote mailbox.
 ///
@@ -106,6 +107,8 @@ impl<T: Read + Write + Unpin + fmt::Debug> Handle<T> {
             self.id.is_some(),
             "Cannot listen to response without starting IDLE"
         );
+        let sender = self.session.unsolicited_responses_tx.clone();
+
         let interrupt = stop_token::StopSource::new();
         let raw_stream = IdleStream::new(self);
         let mut interruptible_stream = interrupt.stop_token().stop_stream(raw_stream);
@@ -118,6 +121,9 @@ impl<T: Read + Write + Unpin + fmt::Debug> Handle<T> {
                     }
                     Response::Continue { .. } => {
                         // continuation, wait for it
+                    }
+                    Response::Done { .. } => {
+                        handle_unilateral(resp, sender.clone()).await;
                     }
                     _ => return IdleResponse::NewData(resp),
                 }
@@ -173,19 +179,15 @@ impl<T: Read + Write + Unpin + fmt::Debug> Handle<T> {
                         if let Status::Bad = status {
                             return Err(io::Error::new(
                                 io::ErrorKind::ConnectionRefused,
-                                information.as_ref().unwrap().to_string(),
+                                information.unwrap().to_string(),
                             )
                             .into());
                         }
                     }
-                    eprintln!(
-                        "unexpected done response {:?} {:?} {:?}",
-                        tag, status, information
-                    );
+                    handle_unilateral(res, self.session.unsolicited_responses_tx.clone()).await;
                 }
-                v => {
-                    // TODO: send through unhandled responses
-                    eprintln!("unexpected response {:?}", v);
+                _ => {
+                    handle_unilateral(res, self.session.unsolicited_responses_tx.clone()).await;
                 }
             }
         }
@@ -201,8 +203,9 @@ impl<T: Read + Write + Unpin + fmt::Debug> Handle<T> {
             "Cannot call DONE on a non initialized idle connection"
         );
         self.session.run_command_untagged("DONE").await?;
+        let sender = self.session.unsolicited_responses_tx.clone();
         self.session
-            .check_ok(self.id.expect("invalid setup"))
+            .check_ok(self.id.expect("invalid setup"), Some(sender))
             .await?;
 
         Ok(self.session)

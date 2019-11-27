@@ -2,6 +2,8 @@
 
 use std::borrow::Cow;
 
+use crate::codec::ResponseData;
+
 /// From section [2.3.1.1 of RFC 3501](https://tools.ietf.org/html/rfc3501#section-2.3.1.1).
 ///
 /// A 32-bit value assigned to each message, which when used with the unique identifier validity
@@ -262,4 +264,6 @@ pub enum UnsolicitedResponse {
     /// sequence numbers 9, 8, 7, 6, and 5.
     // TODO: the spec doesn't seem to say anything about when these may be received as unsolicited?
     Expunge(u32),
+    /// Any other kind of unsolicted response.
+    Other(ResponseData),
 }
