@@ -9,6 +9,7 @@ use async_std::io::{self, Read, Write};
 use async_std::net::{TcpStream, ToSocketAddrs};
 use async_std::prelude::*;
 use async_std::sync;
+use imap_proto::types::Metadata;
 use imap_proto::{RequestId, Response};
 
 use super::authenticator::Authenticator;
@@ -16,6 +17,7 @@ use super::error::{Error, ParseError, Result, ValidateError};
 use super::parse::*;
 use super::types::*;
 use crate::extensions;
+use crate::extensions::metadata::{get_metadata_impl, set_metadata_impl, MetadataDepth};
 use crate::imap_stream::ImapStream;
 
 macro_rules! quote {
@@ -1245,6 +1247,28 @@ impl<T: Read + Write + Unpin + fmt::Debug> Session<T> {
         Ok(uids)
     }
 
+    /// Sends GETMETADATA command to the server and returns the list of entries and their values.
+    pub async fn get_metadata<'a, S: AsRef<str>>(
+        // session: &'a mut Session<T>,
+        &mut self,
+        mbox: S,
+        entries: &[S],
+        depth: MetadataDepth,
+        maxsize: Option<usize>,
+    ) -> Result<Vec<Metadata>> {
+        get_metadata_impl(self, mbox, entries, depth, maxsize).await
+    }
+
+    /// Sends SETMETADATA command to the server and checks if it was executed successfully.
+    pub async fn set_metadata<'a, S: AsRef<str>>(
+        // session: &'a mut Session<T>,
+        &mut self,
+        mbox: S,
+        keyval: &[Metadata],
+    ) -> Result<()> {
+        set_metadata_impl(self, mbox, keyval).await
+    }
+
     // these are only here because they are public interface, the rest is in `Connection`
     /// Runs a command and checks if it returns OK.
     pub async fn run_command_and_check_ok<S: AsRef<str>>(&mut self, command: S) -> Result<()> {
@@ -1370,7 +1394,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Connection<T> {
     }
 }
 
-fn validate_str(value: &str) -> Result<String> {
+pub(crate) fn validate_str(value: &str) -> Result<String> {
     let quoted = quote!(value);
     if quoted.find('\n').is_some() {
         return Err(Error::Validate(ValidateError('\n')));
@@ -1961,6 +1985,69 @@ mod tests {
             Ok(())
         })
         .await;
+    }
+
+    #[async_std::test]
+    async fn getmetadata() {
+        let response = "A0001 OK Logged in.\r\n* METADATA \"\" (/shared/vendor/vendor.coi/a {3}\r\nAAA /shared/vendor/vendor.coi/b {3}\r\nBBB /shared/vendor/vendor.coi/c {3}\r\nCCC)\r\nA0002 OK GETMETADATA Completed\r\n";
+        let commands = format!("A0001 LOGIN \"testuser\" \"pass\"\r\nA0002 GETMETADATA (DEPTH infinity) \"\" (\"/shared/vendor/vendor.coi\" \"/shared/comment\")\r\n");
+        let mock_stream = MockStream::new(response.as_bytes().to_vec());
+        let client = Client::new(mock_stream);
+        let mut session = client.login("testuser", "pass").await.ok().unwrap();
+        let r = session
+            .get_metadata(
+                "",
+                &["/shared/vendor/vendor.coi", "/shared/comment"],
+                MetadataDepth::Inf,
+                Option::None,
+            )
+            .await;
+        assert!(
+            session.stream.inner.written_buf == commands.as_bytes().to_vec(),
+            "Invalid getmetadata command"
+        );
+
+        match r {
+            Ok(v) => {
+                assert_eq!(v.len(), 3);
+                assert_eq!(v[0].entry, "/shared/vendor/vendor.coi/a");
+                assert_eq!(v[0].value.as_ref().expect("None is not expected"), "AAA");
+                assert_eq!(v[1].entry, "/shared/vendor/vendor.coi/b");
+                assert_eq!(v[1].value.as_ref().expect("None is not expected"), "BBB");
+                assert_eq!(v[2].entry, "/shared/vendor/vendor.coi/c");
+                assert_eq!(v[2].value.as_ref().expect("None is not expected"), "CCC");
+            }
+            Err(e) => panic!("Unexpected error: {:?}", e),
+        }
+    }
+
+    #[async_std::test]
+    async fn setmetadata() {
+        let response = "A0001 OK Logged in.\r\n* METADATA \"\" (/shared/vendor/vendor.coi/a {3}\r\nAAA /shared/vendor/vendor.coi/b {3}\r\nBBB /shared/vendor/vendor.coi/c {3}\r\nCCC)\r\nA0002 OK SETMETADATA Completed\r\n";
+        let commands = format!("A0001 LOGIN \"testuser\" \"pass\"\r\nA0002 SETMETADATA \"\" (\"/shared/vendor/vendor.coi\" \"asdf\" \"/shared/comment\" NIL)\r\n");
+        let mock_stream = MockStream::new(response.as_bytes().to_vec());
+        let client = Client::new(mock_stream);
+        let mut session = client.login("testuser", "pass").await.ok().unwrap();
+        session
+            .set_metadata(
+                "",
+                &[
+                    Metadata {
+                        entry: String::from("/shared/vendor/vendor.coi"),
+                        value: Some(String::from("asdf")),
+                    },
+                    Metadata {
+                        entry: String::from("/shared/comment"),
+                        value: None,
+                    },
+                ],
+            )
+            .await
+            .unwrap();
+        assert!(
+            session.stream.inner.written_buf == commands.as_bytes().to_vec(),
+            "Invalid setmetadata command"
+        );
     }
 
     async fn generic_fetch<'a, F, T, K>(prefix: &'a str, op: F)
