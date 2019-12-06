@@ -83,20 +83,22 @@ impl<'a> From<&'a str> for NameAttribute<'a> {
 
 impl Name {
     pub(crate) fn from_mailbox_data(resp: ResponseData) -> Self {
-        let ResponseData { raw, response } = resp;
+        unimplemented!()
+        // let ResponseData { raw, response } = resp;
 
-        match response {
-            Response::MailboxData(MailboxDatum::List {
-                flags,
-                delimiter,
-                name,
-            }) => Name::new(raw, |_data| InnerName {
-                attributes: flags.iter().map(|s| NameAttribute::from(*s)).collect(),
-                delimiter,
-                name,
-            }),
-            _ => panic!("cannot construct from non mailbox data"),
-        }
+        // // TODO: no to_vec
+        // match response {
+        //     Response::MailboxData(MailboxDatum::List {
+        //         flags,
+        //         delimiter,
+        //         name,
+        //     }) => Name::new(raw.to_vec(), |_data| InnerName {
+        //         attributes: flags.iter().map(|s| NameAttribute::from(*s)).collect(),
+        //         delimiter,
+        //         name,
+        //     }),
+        //     _ => panic!("cannot construct from non mailbox data"),
+        // }
     }
 
     /// Attributes of this name.

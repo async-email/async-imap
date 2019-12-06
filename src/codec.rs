@@ -1,187 +1,190 @@
 use std::ops::Deref;
 use std::pin::Pin;
 
-use async_std::io;
+use async_std::io::{self, Read, Write};
+use async_std::prelude::*;
 use async_std::stream::Stream;
+use async_std::sync::Arc;
 use bytes::{BufMut, BytesMut};
 use futures::task::{Context, Poll};
-use futures_codec::{Decoder, Encoder};
 use imap_proto::{RequestId, Response};
 use nom::Needed;
+
+use byte_pool::{Block, BytePool};
+
+const INITIAL_CAPACITY: usize = 1024 * 4;
+
+lazy_static::lazy_static! {
+    static ref POOL: Arc<BytePool> = Arc::new(BytePool::new());
+}
+
+#[derive(Debug)]
+pub struct ResponseStream<R: Read> {
+    // TODO: write some buffering logic
+    pub(crate) inner: R,
+    buffer: Block<'static>,
+    /// Position of valid read data into buffer.
+    current: usize,
+    decode_needs: usize,
+}
+
+enum DecodeResult {
+    Some(ResponseData),
+    None(Block<'static>),
+}
+
+impl<R: Read + Write + Unpin> ResponseStream<R> {
+    /// Creates a new `ResponseStream` based on the given `Read`er.
+    pub fn new(inner: R) -> Self {
+        ResponseStream {
+            inner,
+            buffer: POOL.alloc(INITIAL_CAPACITY),
+            current: 0,
+            decode_needs: 0,
+        }
+    }
+
+    pub async fn encode(&mut self, msg: Request) -> Result<(), io::Error> {
+        if let Some(tag) = msg.0 {
+            self.inner.write_all(tag.as_bytes()).await?;
+            self.inner.write(b" ").await?;
+        }
+        self.inner.write_all(&msg.1).await?;
+        self.inner.write_all(b"\r\n").await?;
+
+        Ok(())
+    }
+
+    pub fn into_inner(self) -> R {
+        self.inner
+    }
+}
+
+impl<R: Read + Unpin> ResponseStream<R> {
+    fn decode(&mut self, buf: Block<'static>, n: usize) -> io::Result<DecodeResult> {
+        if self.decode_needs > n {
+            return Ok(DecodeResult::None(buf));
+        }
+
+        let res = ResponseData::try_new(buf, |buf| {
+            match imap_proto::parse_response(&buf[..n]) {
+                Ok((remaining, response)) => {
+                    // TODO: figure out if we can shrink to the minimum required size.
+                    self.decode_needs = 0;
+                    Ok(response)
+                }
+                Err(nom::Err::Incomplete(Needed::Size(min))) => {
+                    self.decode_needs = min;
+                    Err(None)
+                }
+                Err(nom::Err::Incomplete(_)) => Err(None),
+                Err(err) => Err(Some(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("{:?} during parsing of {:?}", err, buf),
+                ))),
+            }
+        });
+
+        match res {
+            Ok(res) => Ok(DecodeResult::Some(res)),
+            Err(rental::RentalError(err, buf)) => match err {
+                Some(err) => Err(err),
+                None => Ok(DecodeResult::None(buf)),
+            },
+        }
+    }
+}
+
+impl<R: Read + Unpin> Stream for ResponseStream<R> {
+    type Item = io::Result<ResponseData>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = &mut *self;
+
+        let buffer = std::mem::replace(&mut this.buffer, POOL.alloc(INITIAL_CAPACITY));
+
+        let mut buffer = match this.decode(buffer, this.current)? {
+            DecodeResult::Some(item) => {
+                return Poll::Ready(Some(Ok(item)));
+            }
+            DecodeResult::None(buffer) => buffer,
+        };
+
+        loop {
+            if this.current >= buffer.capacity() {
+                // TODO: add max size
+                buffer.realloc(buffer.capacity() + 1024);
+            }
+
+            let n = futures::ready!(
+                Pin::new(&mut this.inner).poll_read(cx, &mut buffer[this.current..])
+            )?;
+
+            this.current += n;
+
+            match this.decode(buffer, n)? {
+                DecodeResult::Some(item) => return Poll::Ready(Some(Ok(item))),
+                DecodeResult::None(buf) => {
+                    buffer = buf;
+
+                    if this.buffer.is_empty() {
+                        // put back the buffer to reuse it
+                        std::mem::replace(&mut this.buffer, buffer);
+
+                        return Poll::Ready(None);
+                    } else if n == 0 {
+                        // put back the buffer to reuse it
+                        std::mem::replace(&mut this.buffer, buffer);
+
+                        return Poll::Ready(Some(Err(io::Error::new(
+                            io::ErrorKind::UnexpectedEof,
+                            "bytes remaining in stream",
+                        )
+                        .into())));
+                    }
+                }
+            }
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct ImapCodec {
     decode_need_message_bytes: usize,
 }
 
-impl Default for ImapCodec {
-    fn default() -> Self {
-        Self {
-            decode_need_message_bytes: 0,
+rental! {
+    pub mod rents {
+        use super::*;
+
+        #[rental(debug, covariant)]
+        pub struct ResponseData {
+            raw: Block<'static>,
+            response: Response<'raw>,
         }
     }
 }
 
-impl<'a> Decoder for ImapCodec {
-    type Item = ResponseData;
-    type Error = io::Error;
+pub use rents::ResponseData;
 
-    fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, io::Error> {
-        if self.decode_need_message_bytes > buf.len() {
-            return Ok(None);
-        }
-
-        let (response, rsp_len) = match imap_proto::parse_response(buf) {
-            Ok((remaining, response)) => {
-                // This SHOULD be acceptable/safe: BytesMut storage memory is
-                // allocated on the heap and should not move. It will not be
-                // freed as long as we keep a reference alive, which we do
-                // by retaining a reference to the split buffer, below.
-                let response = unsafe { std::mem::transmute(response) };
-                (response, buf.len() - remaining.len())
-            }
-            Err(nom::Err::Incomplete(Needed::Size(min))) => {
-                self.decode_need_message_bytes = min;
-                return Ok(None);
-            }
-            Err(nom::Err::Incomplete(_)) => return Ok(None),
-            Err(err) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("{:?} during parsing of {:?}", err, buf),
-                ))
-            }
-        };
-
-        let raw = buf.split_to(rsp_len).freeze().to_vec();
-        self.decode_need_message_bytes = 0;
-        Ok(Some(ResponseData { raw, response }))
+impl std::cmp::PartialEq for ResponseData {
+    fn eq(&self, other: &Self) -> bool {
+        self.parsed() == other.parsed()
     }
 }
 
-impl Encoder for ImapCodec {
-    type Item = Request;
-    type Error = io::Error;
-
-    fn encode(&mut self, msg: Self::Item, dst: &mut BytesMut) -> Result<(), io::Error> {
-        if let Some(tag) = msg.0 {
-            // grow the buffer, as it does not grow automatically
-            dst.reserve(tag.as_bytes().len() + 1);
-            dst.put(tag.as_bytes());
-            dst.put(b' ');
-        }
-        // grow the buffer, as it does not grow automatically
-        dst.reserve(msg.1.len() + 2);
-        dst.put(&msg.1);
-        dst.put("\r\n");
-        Ok(())
-    }
-}
-
-// TODO: use rental for this
-#[derive(Debug, PartialEq, Eq)]
-pub struct ResponseData {
-    pub raw: Vec<u8>,
-    // This reference is really scoped to the lifetime of the `raw`
-    // member, but unfortunately Rust does not allow that yet. It
-    // is transmuted to `'static` by the `Decoder`, instead, and
-    // references returned to callers of `ResponseData` are limited
-    // to the lifetime of the `ResponseData` struct.
-    //
-    // `raw` is never mutated during the lifetime of `ResponseData`,
-    // and `Response` does not not implement any specific drop glue.
-    pub response: Response<'static>,
-}
-
-impl Deref for ResponseData {
-    type Target = Response<'static>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.response
-    }
-}
+impl std::cmp::Eq for ResponseData {}
 
 impl ResponseData {
     pub fn request_id(&self) -> Option<&RequestId> {
-        match self.response {
+        match self.suffix() {
             Response::Done { ref tag, .. } => Some(tag),
             _ => None,
         }
     }
+
     pub fn parsed(&self) -> &Response<'_> {
-        &self.response
-    }
-
-    pub fn into_inner(self) -> Vec<u8> {
-        self.raw
-    }
-}
-
-#[derive(Debug)]
-#[must_use = "futures do nothing unless polled"]
-pub struct ConnStream<
-    T: Stream<Item = io::Result<ResponseData>> + futures::Sink<Request, Error = io::Error> + Unpin,
-> {
-    pub(crate) stream: T,
-}
-
-impl<
-        T: Stream<Item = io::Result<ResponseData>> + futures::Sink<Request, Error = io::Error> + Unpin,
-    > ConnStream<T>
-{
-    unsafe_pinned!(stream: T);
-
-    pub fn new(stream: T) -> Self {
-        ConnStream { stream }
-    }
-
-    pub fn into_inner(self) -> T {
-        self.stream
-    }
-}
-
-impl<
-        T: Stream<Item = io::Result<ResponseData>> + futures::Sink<Request, Error = io::Error> + Unpin,
-    > futures::Sink<Request> for ConnStream<T>
-{
-    type Error = io::Error;
-
-    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.stream().poll_ready(cx)
-    }
-
-    fn start_send(self: Pin<&mut Self>, item: Request) -> Result<(), Self::Error> {
-        self.stream().start_send(item)
-    }
-
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.stream().poll_flush(cx)
-    }
-
-    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.stream().poll_close(cx)
-    }
-}
-
-impl<
-        T: Stream<Item = io::Result<ResponseData>> + futures::Sink<Request, Error = io::Error> + Unpin,
-    > Stream for ConnStream<T>
-{
-    type Item = ResponseData;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let item = match futures::ready!(self.as_mut().stream().poll_next(cx)) {
-            Some(e) => e,
-            None => return Poll::Ready(None),
-        };
-
-        match item {
-            Ok(res) => Poll::Ready(Some(res)),
-            Err(err) => {
-                eprintln!("Receive Error: {:#?}", err);
-                Poll::Ready(None)
-            }
-        }
+        self.suffix()
     }
 }
 
@@ -211,10 +214,4 @@ impl Iterator for IdGenerator {
         self.next += 1;
         Some(RequestId(format!("A{:04}", self.next % 10_000)))
     }
-}
-
-impl<
-        T: Stream<Item = io::Result<ResponseData>> + futures::Sink<Request, Error = io::Error> + Unpin,
-    > Unpin for ConnStream<T>
-{
 }

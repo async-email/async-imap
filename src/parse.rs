@@ -10,7 +10,7 @@ use super::error::{Error, Result};
 use super::types::*;
 use crate::codec::ResponseData;
 
-pub(crate) fn parse_names<'a, T: Stream<Item = ResponseData> + Unpin>(
+pub(crate) fn parse_names<'a, T: Stream<Item = io::Result<ResponseData>> + Unpin>(
     stream: &'a mut T,
     unsolicited: sync::Sender<UnsolicitedResponse>,
     command_tag: RequestId,
@@ -18,30 +18,44 @@ pub(crate) fn parse_names<'a, T: Stream<Item = ResponseData> + Unpin>(
     use futures::StreamExt;
 
     StreamExt::filter_map(
-        StreamExt::take_while(stream, move |res| match res.parsed() {
-            Response::Done { tag, .. } => futures::future::ready(&command_tag != tag),
-            _ => futures::future::ready(true),
-        }),
+        StreamExt::take_while(stream, move |res| filter(res, &command_tag)),
         move |resp| {
             let unsolicited = unsolicited.clone();
-
             async move {
-                match resp.parsed() {
-                    Response::MailboxData(MailboxDatum::List { .. }) => {
-                        let name = Name::from_mailbox_data(resp);
-                        Some(Ok(name))
-                    }
-                    _ => {
-                        handle_unilateral(resp, unsolicited).await;
-                        None
-                    }
+                match resp {
+                    Ok(resp) => match resp.parsed() {
+                        Response::MailboxData(MailboxDatum::List { .. }) => {
+                            let name = Name::from_mailbox_data(resp);
+                            Some(Ok(name))
+                        }
+                        _ => {
+                            handle_unilateral(resp, unsolicited).await;
+                            None
+                        }
+                    },
+                    Err(err) => Some(Err(err.into())),
                 }
             }
         },
     )
 }
 
-pub(crate) fn parse_fetches<'a, T: Stream<Item = ResponseData> + Unpin>(
+fn filter(res: &io::Result<ResponseData>, command_tag: &RequestId) -> impl Future<Output = bool> {
+    let val = filter_sync(res, command_tag);
+    futures::future::ready(val)
+}
+
+fn filter_sync(res: &io::Result<ResponseData>, command_tag: &RequestId) -> bool {
+    match res {
+        Ok(res) => match res.parsed() {
+            Response::Done { tag, .. } => tag != command_tag,
+            _ => true,
+        },
+        Err(err) => false,
+    }
+}
+
+pub(crate) fn parse_fetches<'a, T: Stream<Item = io::Result<ResponseData>> + Unpin>(
     stream: &'a mut T,
     unsolicited: sync::Sender<UnsolicitedResponse>,
     command_tag: RequestId,
@@ -49,27 +63,27 @@ pub(crate) fn parse_fetches<'a, T: Stream<Item = ResponseData> + Unpin>(
     use futures::StreamExt;
 
     StreamExt::filter_map(
-        StreamExt::take_while(stream, move |res| match res.parsed() {
-            Response::Done { tag, .. } => futures::future::ready(tag != &command_tag),
-            _ => futures::future::ready(true),
-        }),
+        StreamExt::take_while(stream, move |res| filter(res, &command_tag)),
         move |resp| {
             let unsolicited = unsolicited.clone();
 
             async move {
-                match resp.parsed() {
-                    Response::Fetch(..) => Some(Ok(Fetch::new(resp))),
-                    _ => {
-                        handle_unilateral(resp, unsolicited).await;
-                        None
-                    }
+                match resp {
+                    Ok(resp) => match resp.parsed() {
+                        Response::Fetch(..) => Some(Ok(Fetch::new(resp))),
+                        _ => {
+                            handle_unilateral(resp, unsolicited).await;
+                            None
+                        }
+                    },
+                    Err(err) => Some(Err(err.into())),
                 }
             }
         },
     )
 }
 
-pub(crate) fn parse_expunge<'a, T: Stream<Item = ResponseData> + Unpin>(
+pub(crate) fn parse_expunge<'a, T: Stream<Item = io::Result<ResponseData>> + Unpin>(
     stream: &'a mut T,
     unsolicited: sync::Sender<UnsolicitedResponse>,
     command_tag: RequestId,
@@ -77,27 +91,27 @@ pub(crate) fn parse_expunge<'a, T: Stream<Item = ResponseData> + Unpin>(
     use futures::StreamExt;
 
     StreamExt::filter_map(
-        StreamExt::take_while(stream, move |res| match res.parsed() {
-            Response::Done { tag, .. } => futures::future::ready(&command_tag != tag),
-            _ => futures::future::ready(true),
-        }),
+        StreamExt::take_while(stream, move |res| filter(res, &command_tag)),
         move |resp| {
             let unsolicited = unsolicited.clone();
 
             async move {
-                match resp.parsed() {
-                    Response::Expunge(id) => Some(Ok(*id)),
-                    _ => {
-                        handle_unilateral(resp, unsolicited).await;
-                        None
-                    }
+                match resp {
+                    Ok(resp) => match resp.parsed() {
+                        Response::Expunge(id) => Some(Ok(*id)),
+                        _ => {
+                            handle_unilateral(resp, unsolicited).await;
+                            None
+                        }
+                    },
+                    Err(err) => Some(Err(err.into())),
                 }
             }
         },
     )
 }
 
-pub(crate) async fn parse_capabilities<'a, T: Stream<Item = ResponseData> + Unpin>(
+pub(crate) async fn parse_capabilities<'a, T: Stream<Item = io::Result<ResponseData>> + Unpin>(
     stream: &'a mut T,
     unsolicited: sync::Sender<UnsolicitedResponse>,
     command_tag: RequestId,
@@ -105,13 +119,11 @@ pub(crate) async fn parse_capabilities<'a, T: Stream<Item = ResponseData> + Unpi
     let mut caps: HashSet<Capability> = HashSet::new();
 
     while let Some(resp) = stream
-        .take_while(|res| match res.parsed() {
-            Response::Done { tag, .. } => &command_tag != tag,
-            _ => true,
-        })
+        .take_while(|res| filter_sync(res, &command_tag))
         .next()
         .await
     {
+        let resp = resp?;
         match resp.parsed() {
             Response::Capabilities(cs) => {
                 for c in cs {
@@ -127,31 +139,24 @@ pub(crate) async fn parse_capabilities<'a, T: Stream<Item = ResponseData> + Unpi
     Ok(Capabilities(caps))
 }
 
-pub(crate) async fn parse_noop<T: Stream<Item = ResponseData> + Unpin>(
+pub(crate) async fn parse_noop<T: Stream<Item = io::Result<ResponseData>> + Unpin>(
     stream: &mut T,
     unsolicited: sync::Sender<UnsolicitedResponse>,
     command_tag: RequestId,
 ) -> Result<()> {
-    let s = futures::StreamExt::filter_map(
-        futures::StreamExt::take_while(stream, move |res| match res.parsed() {
-            Response::Done { tag, .. } => futures::future::ready(&command_tag != tag),
-            _ => futures::future::ready(true),
-        }),
-        move |resp| {
-            let unsolicited = unsolicited.clone();
-
-            async move {
-                handle_unilateral(resp, unsolicited).await;
-                None
-            }
-        },
-    );
-    s.collect::<Result<()>>().await?;
+    while let Some(resp) = stream
+        .take_while(|res| filter_sync(res, &command_tag))
+        .next()
+        .await
+    {
+        let resp = resp?;
+        handle_unilateral(resp, unsolicited.clone()).await;
+    }
 
     Ok(())
 }
 
-pub(crate) async fn parse_mailbox<T: Stream<Item = ResponseData> + Unpin>(
+pub(crate) async fn parse_mailbox<T: Stream<Item = io::Result<ResponseData>> + Unpin>(
     stream: &mut T,
     unsolicited: sync::Sender<UnsolicitedResponse>,
     command_tag: RequestId,
@@ -159,103 +164,101 @@ pub(crate) async fn parse_mailbox<T: Stream<Item = ResponseData> + Unpin>(
     let mut mailbox = Mailbox::default();
 
     while let Some(resp) = stream
-        .take_while(|res| match res.parsed() {
-            Response::Done { tag, .. } => tag != &command_tag,
-            _ => true,
-        })
+        .take_while(|res| filter_sync(res, &command_tag))
         .next()
         .await
     {
-        let ResponseData { response, raw } = resp;
-        match response {
-            Response::Data {
-                status,
-                code,
-                information,
-            } => {
-                use imap_proto::Status;
+        unimplemented!()
+        //     let ResponseData { response, raw } = resp;
+        //     match response {
+        //         Response::Data {
+        //             status,
+        //             code,
+        //             information,
+        //         } => {
+        //             use imap_proto::Status;
 
-                match status {
-                    Status::Ok => {
-                        use imap_proto::ResponseCode;
-                        match code {
-                            Some(ResponseCode::UidValidity(uid)) => {
-                                mailbox.uid_validity = Some(uid);
-                            }
-                            Some(ResponseCode::UidNext(unext)) => {
-                                mailbox.uid_next = Some(unext);
-                            }
-                            Some(ResponseCode::Unseen(n)) => {
-                                mailbox.unseen = Some(n);
-                            }
-                            Some(ResponseCode::PermanentFlags(flags)) => {
-                                mailbox
-                                    .permanent_flags
-                                    .extend(flags.iter().map(|s| (*s).to_string()).map(Flag::from));
-                            }
-                            _ => {}
-                        }
-                    }
-                    Status::Bad => {
-                        return Err(Error::Bad(format!(
-                            "code: {:?}, info: {:?}",
-                            code, information
-                        )))
-                    }
-                    Status::No => {
-                        return Err(Error::No(format!(
-                            "code: {:?}, info: {:?}",
-                            code, information
-                        )))
-                    }
-                    _ => {
-                        return Err(Error::Io(io::Error::new(
-                            io::ErrorKind::Other,
-                            format!(
-                                "status: {:?}, code: {:?}, information: {:?}",
-                                status, code, information
-                            ),
-                        )));
-                    }
-                }
-            }
-            Response::MailboxData(m) => match m {
-                MailboxDatum::Status { mailbox, status } => {
-                    unsolicited
-                        .send(UnsolicitedResponse::Status {
-                            mailbox: (*mailbox).into(),
-                            attributes: status,
-                        })
-                        .await;
-                }
-                MailboxDatum::Exists(e) => {
-                    mailbox.exists = e;
-                }
-                MailboxDatum::Recent(r) => {
-                    mailbox.recent = r;
-                }
-                MailboxDatum::Flags(flags) => {
-                    mailbox
-                        .flags
-                        .extend(flags.iter().map(|s| (*s).to_string()).map(Flag::from));
-                }
-                MailboxDatum::List { .. } => {}
-                MailboxDatum::MetadataSolicited { .. } => {}
-                MailboxDatum::MetadataUnsolicited { .. } => {}
-            },
-            Response::Expunge(n) => {
-                unsolicited.send(UnsolicitedResponse::Expunge(n)).await;
-            }
-            _ => {
-                handle_unilateral(ResponseData { response, raw }, unsolicited.clone()).await;
-            }
-        }
+        //             match status {
+        //                 Status::Ok => {
+        //                     use imap_proto::ResponseCode;
+        //                     match code {
+        //                         Some(ResponseCode::UidValidity(uid)) => {
+        //                             mailbox.uid_validity = Some(uid);
+        //                         }
+        //                         Some(ResponseCode::UidNext(unext)) => {
+        //                             mailbox.uid_next = Some(unext);
+        //                         }
+        //                         Some(ResponseCode::Unseen(n)) => {
+        //                             mailbox.unseen = Some(n);
+        //                         }
+        //                         Some(ResponseCode::PermanentFlags(flags)) => {
+        //                             mailbox
+        //                                 .permanent_flags
+        //                                 .extend(flags.iter().map(|s| (*s).to_string()).map(Flag::from));
+        //                         }
+        //                         _ => {}
+        //                     }
+        //                 }
+        //                 Status::Bad => {
+        //                     return Err(Error::Bad(format!(
+        //                         "code: {:?}, info: {:?}",
+        //                         code, information
+        //                     )))
+        //                 }
+        //                 Status::No => {
+        //                     return Err(Error::No(format!(
+        //                         "code: {:?}, info: {:?}",
+        //                         code, information
+        //                     )))
+        //                 }
+        //                 _ => {
+        //                     return Err(Error::Io(io::Error::new(
+        //                         io::ErrorKind::Other,
+        //                         format!(
+        //                             "status: {:?}, code: {:?}, information: {:?}",
+        //                             status, code, information
+        //                         ),
+        //                     )));
+        //                 }
+        //             }
+        //         }
+        //         Response::MailboxData(m) => match m {
+        //             MailboxDatum::Status { mailbox, status } => {
+        //                 unsolicited
+        //                     .send(UnsolicitedResponse::Status {
+        //                         mailbox: (*mailbox).into(),
+        //                         attributes: status,
+        //                     })
+        //                     .await;
+        //             }
+        //             MailboxDatum::Exists(e) => {
+        //                 mailbox.exists = e;
+        //             }
+        //             MailboxDatum::Recent(r) => {
+        //                 mailbox.recent = r;
+        //             }
+        //             MailboxDatum::Flags(flags) => {
+        //                 mailbox
+        //                     .flags
+        //                     .extend(flags.iter().map(|s| (*s).to_string()).map(Flag::from));
+        //             }
+        //             MailboxDatum::List { .. } => {}
+        //             MailboxDatum::MetadataSolicited { .. } => {}
+        //             MailboxDatum::MetadataUnsolicited { .. } => {}
+        //         },
+        //         Response::Expunge(n) => {
+        //             unsolicited.send(UnsolicitedResponse::Expunge(n)).await;
+        //         }
+        //         _ => {
+        //             // handle_unilateral(ResponseData { response, raw }, unsolicited.clone()).await;
+        //         }
+        //     }
     }
 
     Ok(mailbox)
 }
 
-pub(crate) async fn parse_ids<T: Stream<Item = ResponseData> + Unpin>(
+pub(crate) async fn parse_ids<T: Stream<Item = io::Result<ResponseData>> + Unpin>(
     stream: &mut T,
     unsolicited: sync::Sender<UnsolicitedResponse>,
     command_tag: RequestId,
@@ -263,13 +266,11 @@ pub(crate) async fn parse_ids<T: Stream<Item = ResponseData> + Unpin>(
     let mut ids: HashSet<u32> = HashSet::new();
 
     while let Some(resp) = stream
-        .take_while(|res| match res.parsed() {
-            Response::Done { tag, .. } => &command_tag != tag,
-            _ => true,
-        })
+        .take_while(|res| filter_sync(res, &command_tag))
         .next()
         .await
     {
+        let resp = resp?;
         match resp.parsed() {
             Response::IDs(cs) => {
                 for c in cs {
@@ -291,49 +292,50 @@ pub(crate) async fn handle_unilateral(
     res: ResponseData,
     unsolicited: sync::Sender<UnsolicitedResponse>,
 ) {
-    let ResponseData { raw, response } = res;
+    unimplemented!()
+    // let ResponseData { raw, response } = res;
 
-    match response {
-        Response::MailboxData(MailboxDatum::Status { mailbox, status }) => {
-            unsolicited
-                .send(UnsolicitedResponse::Status {
-                    mailbox: (*mailbox).into(),
-                    attributes: status,
-                })
-                .await;
-        }
-        Response::MailboxData(MailboxDatum::Recent(n)) => {
-            unsolicited.send(UnsolicitedResponse::Recent(n)).await;
-        }
-        Response::MailboxData(MailboxDatum::Exists(n)) => {
-            unsolicited.send(UnsolicitedResponse::Exists(n)).await;
-        }
-        Response::Expunge(n) => {
-            unsolicited.send(UnsolicitedResponse::Expunge(n)).await;
-        }
-        _ => {
-            unsolicited
-                .send(UnsolicitedResponse::Other(ResponseData { raw, response }))
-                .await;
-        }
-    }
+    // match response {
+    //     Response::MailboxData(MailboxDatum::Status { mailbox, status }) => {
+    //         unsolicited
+    //             .send(UnsolicitedResponse::Status {
+    //                 mailbox: (*mailbox).into(),
+    //                 attributes: status,
+    //             })
+    //             .await;
+    //     }
+    //     Response::MailboxData(MailboxDatum::Recent(n)) => {
+    //         unsolicited.send(UnsolicitedResponse::Recent(n)).await;
+    //     }
+    //     Response::MailboxData(MailboxDatum::Exists(n)) => {
+    //         unsolicited.send(UnsolicitedResponse::Exists(n)).await;
+    //     }
+    //     Response::Expunge(n) => {
+    //         unsolicited.send(UnsolicitedResponse::Expunge(n)).await;
+    //     }
+    //     _ => {
+    //         unsolicited
+    //             .send(UnsolicitedResponse::Other(ResponseData { raw, response }))
+    //             .await;
+    //     }
+    // }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn input_stream(data: &[&str]) -> Vec<ResponseData> {
+    fn input_stream(data: &[&str]) -> Vec<io::Result<ResponseData>> {
         data.iter()
             .map(|line| match imap_proto::parse_response(line.as_bytes()) {
                 Ok((remaining, response)) => {
-                    let response = unsafe { std::mem::transmute(response) };
+                    // let response = unsafe { std::mem::transmute(response) };
                     assert_eq!(remaining.len(), 0);
-
-                    ResponseData {
-                        raw: line.as_bytes().to_vec().into(),
-                        response,
-                    }
+                    unimplemented!()
+                    // ResponseData {
+                    //     raw: line.as_bytes().to_vec().into(),
+                    //     response,
+                    // }
                 }
                 Err(err) => panic!("invalid input: {:?}", err),
             })

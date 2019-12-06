@@ -4,22 +4,20 @@ use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::str;
 
+use async_native_tls::{TlsConnector, TlsStream};
 use async_std::io::{self, Read, Write};
 use async_std::net::{TcpStream, ToSocketAddrs};
 use async_std::prelude::*;
 use async_std::sync;
-
-use async_native_tls::{TlsConnector, TlsStream};
-
+use async_std::sync::Arc;
 use futures::SinkExt;
-use futures_codec::Framed;
 use imap_proto::{RequestId, Response};
 
 use super::authenticator::Authenticator;
 use super::error::{Error, ParseError, Result, ValidateError};
 use super::parse::*;
 use super::types::*;
-use crate::codec::{ConnStream, IdGenerator, ImapCodec, Request, ResponseData};
+use crate::codec::{IdGenerator, Request, ResponseData, ResponseStream};
 use crate::extensions;
 
 macro_rules! quote {
@@ -66,7 +64,7 @@ pub struct Client<T: Read + Write + Unpin + fmt::Debug> {
 #[derive(Debug)]
 #[doc(hidden)]
 pub struct Connection<T: Read + Write + Unpin + fmt::Debug> {
-    pub(crate) stream: ConnStream<Framed<T, ImapCodec>>,
+    pub(crate) stream: ResponseStream<T>,
 
     /// Enable debug mode for this connection so that all client-server interactions are printed to
     /// `STDERR`.
@@ -154,7 +152,7 @@ impl Client<TcpStream> {
     ) -> Result<Client<TlsStream<TcpStream>>> {
         self.run_command_and_check_ok("STARTTLS", None).await?;
         let ssl_stream = ssl_connector
-            .connect(domain.as_ref(), self.conn.stream.into_inner().release().0)
+            .connect(domain.as_ref(), self.conn.stream.into_inner())
             .await?;
 
         let client = Client::new(ssl_stream);
@@ -187,11 +185,11 @@ impl<T: Read + Write + Unpin + fmt::Debug> Client<T> {
     /// This method primarily exists for writing tests that mock the underlying transport, but can
     /// also be used to support IMAP over custom tunnels.
     pub fn new(stream: T) -> Client<T> {
-        let framed = Framed::new(stream, ImapCodec::default());
+        let stream = ResponseStream::new(stream);
 
         Client {
             conn: Connection {
-                stream: ConnStream::new(framed),
+                stream,
                 debug: false,
                 greeting_read: false,
                 request_ids: IdGenerator::new(),
@@ -312,32 +310,36 @@ impl<T: Read + Write + Unpin + fmt::Debug> Client<T> {
         // explicit match blocks neccessary to convert error to tuple and not bind self too
         // early (see also comment on `login`)
         if let Some(res) = self.read_response().await {
-            // FIXME: Some servers will only send `+\r\n` need to handle that in imap_proto.
-            match res.parsed() {
-                Response::Continue { information, .. } if information.is_some() => {
-                    let text = information.unwrap();
-                    let challenge = ok_or_unauth_client_err!(
-                        base64::decode(text).map_err(|e| Error::Parse(ParseError::Authentication(
-                            text.to_string(),
-                            Some(e)
-                        ))),
-                        self
-                    );
-                    let raw_response = &authenticator.process(&challenge);
-                    let auth_response = base64::encode(raw_response);
-                    ok_or_unauth_client_err!(
-                        self.conn.run_command_untagged(&auth_response).await,
-                        self
-                    );
-                    Ok(Session::new(self.conn))
-                }
-                _ => {
-                    if self.read_response().await.is_some() {
-                        Ok(Session::new(self.conn))
-                    } else {
-                        Err((Error::ConnectionLost, self))
+            match res {
+                Ok(res) => {
+                    // FIXME: Some servers will only send `+\r\n` need to handle that in imap_proto.
+                    match res.parsed() {
+                        Response::Continue { information, .. } if information.is_some() => {
+                            let text = information.unwrap();
+                            let challenge = ok_or_unauth_client_err!(
+                                base64::decode(text).map_err(|e| Error::Parse(
+                                    ParseError::Authentication(text.to_string(), Some(e))
+                                )),
+                                self
+                            );
+                            let raw_response = &authenticator.process(&challenge);
+                            let auth_response = base64::encode(raw_response);
+                            ok_or_unauth_client_err!(
+                                self.conn.run_command_untagged(&auth_response).await,
+                                self
+                            );
+                            Ok(Session::new(self.conn))
+                        }
+                        _ => {
+                            if self.read_response().await.is_some() {
+                                Ok(Session::new(self.conn))
+                            } else {
+                                Err((Error::ConnectionLost, self))
+                            }
+                        }
                     }
                 }
+                Err(err) => Err((err.into(), self)),
             }
         } else {
             Err((Error::ConnectionLost, self))
@@ -348,7 +350,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Client<T> {
 impl<T: Read + Write + Unpin + fmt::Debug> Session<T> {
     unsafe_pinned!(conn: Connection<T>);
 
-    pub(crate) fn get_stream(self: Pin<&mut Self>) -> Pin<&mut ConnStream<Framed<T, ImapCodec>>> {
+    pub(crate) fn get_stream(self: Pin<&mut Self>) -> Pin<&mut ResponseStream<T>> {
         self.conn().stream()
     }
 
@@ -1265,33 +1267,35 @@ impl<T: Read + Write + Unpin + fmt::Debug> Session<T> {
     }
 
     /// Read the next response on the connection.
-    pub async fn read_response(&mut self) -> Option<ResponseData> {
+    pub async fn read_response(&mut self) -> Option<io::Result<ResponseData>> {
         self.conn.read_response().await
     }
 }
 
 impl<T: Read + Write + Unpin + fmt::Debug> Connection<T> {
-    unsafe_pinned!(stream: ConnStream<Framed<T, ImapCodec>>);
+    unsafe_pinned!(stream: ResponseStream<T>);
 
     /// Read the next response on the connection.
-    pub async fn read_response(&mut self) -> Option<ResponseData> {
+    pub async fn read_response(&mut self) -> Option<io::Result<ResponseData>> {
         self.stream.next().await
     }
 
     pub(crate) async fn run_command_untagged(&mut self, command: &str) -> Result<()> {
         self.stream
-            .send(Request(None, command.as_bytes().into()))
+            .encode(Request(None, command.as_bytes().into()))
             .await?;
-        self.stream.flush().await?;
+        // TODO
+        // self.stream.flush().await?;
         Ok(())
     }
 
     pub(crate) async fn run_command(&mut self, command: &str) -> Result<RequestId> {
         let request_id = self.request_ids.next().unwrap(); // safe: never returns Err
         self.stream
-            .send(Request(Some(request_id.clone()), command.as_bytes().into()))
+            .encode(Request(Some(request_id.clone()), command.as_bytes().into()))
             .await?;
-        self.stream.flush().await?;
+        // TODO
+        // self.stream.flush().await?;
         Ok(request_id)
     }
 
@@ -1313,6 +1317,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Connection<T> {
         unsolicited: Option<sync::Sender<UnsolicitedResponse>>,
     ) -> Result<()> {
         while let Some(res) = self.stream.next().await {
+            let res = res?;
             if let Response::Done {
                 status,
                 code,
@@ -1421,7 +1426,7 @@ mod tests {
             .with_delay();
 
         let mut client = mock_client!(mock_stream);
-        let actual_response = client.read_response().await.unwrap();
+        let actual_response = client.read_response().await.unwrap().unwrap();
         assert_eq!(
             actual_response.parsed(),
             &Response::Data {
@@ -1445,7 +1450,7 @@ mod tests {
         // TODO Check the error test
         let mock_stream = MockStream::default().with_err();
         let mut client = mock_client!(mock_stream);
-        client.read_response().await.unwrap();
+        client.read_response().await.unwrap().unwrap();
     }
 
     #[async_attributes::test]
@@ -1473,7 +1478,7 @@ mod tests {
             .ok()
             .unwrap();
         assert_eq_bytes!(
-            &session.stream.stream.written_buf,
+            &session.stream.inner.written_buf,
             command.as_bytes(),
             "Invalid authenticate command"
         );
@@ -1489,7 +1494,7 @@ mod tests {
         let client = mock_client!(mock_stream);
         if let Ok(session) = client.login(username, password).await {
             assert_eq!(
-                session.stream.stream.written_buf,
+                session.stream.inner.written_buf,
                 command.as_bytes().to_vec(),
                 "Invalid login command"
             );
@@ -1506,7 +1511,7 @@ mod tests {
         let mut session = mock_session!(mock_stream);
         session.logout().await.unwrap();
         assert!(
-            session.stream.stream.written_buf == command.as_bytes().to_vec(),
+            session.stream.inner.written_buf == command.as_bytes().to_vec(),
             "Invalid logout command"
         );
     }
@@ -1528,7 +1533,7 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            session.stream.stream.written_buf == command.as_bytes().to_vec(),
+            session.stream.inner.written_buf == command.as_bytes().to_vec(),
             "Invalid rename command"
         );
     }
@@ -1542,7 +1547,7 @@ mod tests {
         let mut session = mock_session!(mock_stream);
         session.subscribe(mailbox).await.unwrap();
         assert!(
-            session.stream.stream.written_buf == command.as_bytes().to_vec(),
+            session.stream.inner.written_buf == command.as_bytes().to_vec(),
             "Invalid subscribe command"
         );
     }
@@ -1556,7 +1561,7 @@ mod tests {
         let mut session = mock_session!(mock_stream);
         session.unsubscribe(mailbox).await.unwrap();
         assert!(
-            session.stream.stream.written_buf == command.as_bytes().to_vec(),
+            session.stream.inner.written_buf == command.as_bytes().to_vec(),
             "Invalid unsubscribe command"
         );
     }
@@ -1568,7 +1573,7 @@ mod tests {
         let mut session = mock_session!(mock_stream);
         session.expunge().await.unwrap().collect::<Vec<_>>().await;
         assert!(
-            session.stream.stream.written_buf == b"A0001 EXPUNGE\r\n".to_vec(),
+            session.stream.inner.written_buf == b"A0001 EXPUNGE\r\n".to_vec(),
             "Invalid expunge command"
         );
     }
@@ -1589,7 +1594,7 @@ mod tests {
             .collect::<Vec<_>>()
             .await;
         assert!(
-            session.stream.stream.written_buf == b"A0001 UID EXPUNGE 2:4\r\n".to_vec(),
+            session.stream.inner.written_buf == b"A0001 UID EXPUNGE 2:4\r\n".to_vec(),
             "Invalid expunge command"
         );
     }
@@ -1601,7 +1606,7 @@ mod tests {
         let mut session = mock_session!(mock_stream);
         session.check().await.unwrap();
         assert!(
-            session.stream.stream.written_buf == b"A0001 CHECK\r\n".to_vec(),
+            session.stream.inner.written_buf == b"A0001 CHECK\r\n".to_vec(),
             "Invalid check command"
         );
     }
@@ -1638,7 +1643,7 @@ mod tests {
         let mut session = mock_session!(mock_stream);
         let mailbox = session.examine(mailbox_name).await.unwrap();
         assert!(
-            session.stream.stream.written_buf == command.as_bytes().to_vec(),
+            session.stream.inner.written_buf == command.as_bytes().to_vec(),
             "Invalid examine command"
         );
         assert_eq!(mailbox, expected_mailbox);
@@ -1684,7 +1689,7 @@ mod tests {
         let mut session = mock_session!(mock_stream);
         let mailbox = session.select(mailbox_name).await.unwrap();
         assert!(
-            session.stream.stream.written_buf == command.as_bytes().to_vec(),
+            session.stream.inner.written_buf == command.as_bytes().to_vec(),
             "Invalid select command"
         );
         assert_eq!(mailbox, expected_mailbox);
@@ -1700,7 +1705,7 @@ mod tests {
         let ids = session.search("Unseen").await.unwrap();
         let ids: HashSet<u32> = ids.iter().cloned().collect();
         assert!(
-            session.stream.stream.written_buf == b"A0001 SEARCH Unseen\r\n".to_vec(),
+            session.stream.inner.written_buf == b"A0001 SEARCH Unseen\r\n".to_vec(),
             "Invalid search command"
         );
         assert_eq!(ids, [1, 2, 3, 4, 5].iter().cloned().collect());
@@ -1716,7 +1721,7 @@ mod tests {
         let ids = session.uid_search("Unseen").await.unwrap();
         let ids: HashSet<Uid> = ids.iter().cloned().collect();
         assert!(
-            session.stream.stream.written_buf == b"A0001 UID SEARCH Unseen\r\n".to_vec(),
+            session.stream.inner.written_buf == b"A0001 UID SEARCH Unseen\r\n".to_vec(),
             "Invalid search command"
         );
         assert_eq!(ids, [1, 2, 3, 4, 5].iter().cloned().collect());
@@ -1733,7 +1738,7 @@ mod tests {
         let ids = session.uid_search("Unseen").await.unwrap();
         let ids: HashSet<Uid> = ids.iter().cloned().collect();
         assert!(
-            session.stream.stream.written_buf == b"A0001 UID SEARCH Unseen\r\n".to_vec(),
+            session.stream.inner.written_buf == b"A0001 UID SEARCH Unseen\r\n".to_vec(),
             "Invalid search command"
         );
         assert_eq!(ids, [1, 2, 3, 4, 5].iter().cloned().collect());
@@ -1749,7 +1754,7 @@ mod tests {
         let mut session = mock_session!(mock_stream);
         let capabilities = session.capabilities().await.unwrap();
         assert!(
-            session.stream.stream.written_buf == b"A0001 CAPABILITY\r\n".to_vec(),
+            session.stream.inner.written_buf == b"A0001 CAPABILITY\r\n".to_vec(),
             "Invalid capability command"
         );
         assert_eq!(capabilities.len(), 4);
@@ -1767,7 +1772,7 @@ mod tests {
         let mut session = mock_session!(mock_stream);
         session.create(mailbox_name).await.unwrap();
         assert!(
-            session.stream.stream.written_buf == command.as_bytes().to_vec(),
+            session.stream.inner.written_buf == command.as_bytes().to_vec(),
             "Invalid create command"
         );
     }
@@ -1781,7 +1786,7 @@ mod tests {
         let mut session = mock_session!(mock_stream);
         session.delete(mailbox_name).await.unwrap();
         assert!(
-            session.stream.stream.written_buf == command.as_bytes().to_vec(),
+            session.stream.inner.written_buf == command.as_bytes().to_vec(),
             "Invalid delete command"
         );
     }
@@ -1793,7 +1798,7 @@ mod tests {
         let mut session = mock_session!(mock_stream);
         session.noop().await.unwrap();
         assert!(
-            session.stream.stream.written_buf == b"A0001 NOOP\r\n".to_vec(),
+            session.stream.inner.written_buf == b"A0001 NOOP\r\n".to_vec(),
             "Invalid noop command"
         );
     }
@@ -1805,7 +1810,7 @@ mod tests {
         let mut session = mock_session!(mock_stream);
         session.close().await.unwrap();
         assert!(
-            session.stream.stream.written_buf == b"A0001 CLOSE\r\n".to_vec(),
+            session.stream.inner.written_buf == b"A0001 CLOSE\r\n".to_vec(),
             "Invalid close command"
         );
     }
@@ -1906,7 +1911,7 @@ mod tests {
         let mut session = mock_session!(mock_stream);
         session.mv("1:2", mailbox_name).await.unwrap();
         assert!(
-            session.stream.stream.written_buf == command.as_bytes().to_vec(),
+            session.stream.inner.written_buf == command.as_bytes().to_vec(),
             "Invalid move command"
         );
     }
@@ -1924,7 +1929,7 @@ mod tests {
         let mut session = mock_session!(mock_stream);
         session.uid_mv("41:42", mailbox_name).await.unwrap();
         assert!(
-            session.stream.stream.written_buf == command.as_bytes().to_vec(),
+            session.stream.inner.written_buf == command.as_bytes().to_vec(),
             "Invalid uid move command"
         );
     }
@@ -1989,7 +1994,7 @@ mod tests {
             let _ = op(session.clone(), seq, query).await.unwrap();
         }
         assert!(
-            session.lock().await.stream.stream.written_buf == line.as_bytes().to_vec(),
+            session.lock().await.stream.inner.written_buf == line.as_bytes().to_vec(),
             "Invalid command"
         );
     }

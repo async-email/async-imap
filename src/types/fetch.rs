@@ -48,31 +48,33 @@ pub struct Fetch {
 
 impl Fetch {
     pub(crate) fn new(resp: ResponseData) -> Self {
-        let ResponseData { raw, response } = resp;
+        unimplemented!()
+        // let ResponseData { raw, response } = resp;
 
-        match response {
-            Response::Fetch(message, attrs) => {
-                let mut uid = None;
-                let mut size = None;
+        // match response {
+        //     Response::Fetch(message, attrs) => {
+        //         let mut uid = None;
+        //         let mut size = None;
 
-                let inner = InnerFetch::new(raw, |_data| attrs);
-                for attr in inner.suffix() {
-                    match attr {
-                        AttributeValue::Uid(id) => uid = Some(*id),
-                        AttributeValue::Rfc822Size(sz) => size = Some(*sz),
-                        _ => {}
-                    }
-                }
+        //         // TODO: no to_vec
+        //         let inner = InnerFetch::new(raw.to_vec(), |_data| attrs);
+        //         for attr in inner.suffix() {
+        //             match attr {
+        //                 AttributeValue::Uid(id) => uid = Some(*id),
+        //                 AttributeValue::Rfc822Size(sz) => size = Some(*sz),
+        //                 _ => {}
+        //             }
+        //         }
 
-                Fetch {
-                    message,
-                    uid,
-                    size,
-                    inner,
-                }
-            }
-            _ => panic!("cannot create from non fetch response"),
-        }
+        //         Fetch {
+        //             message,
+        //             uid,
+        //             size,
+        //             inner,
+        //         }
+        //     }
+        //     _ => panic!("cannot create from non fetch response"),
+        // }
     }
 
     /// A list of flags that are set for this message.

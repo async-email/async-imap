@@ -30,12 +30,13 @@ async-native-tls = "0.1.1"
 native-tls = "0.2.3"
 async-std = { version = "1.0", features = ["unstable"] }
 pin-utils = "0.1.0-alpha.4"
-futures_codec = "0.3"
 bytes = "0.4.12"
 futures = "0.3.0"
 async-attributes = "1.1.0"
 rental = "0.5.5"
 stop-token = { version = "0.1.1", features = ["unstable"] }
+byte-pool = { path = "../byte-pool" } # "0.2.0"
+lazy_static = "1.4.0"
 
 [dev-dependencies]
 lettre = "0.9"
