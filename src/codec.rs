@@ -5,7 +5,6 @@ use async_std::io::{self, Read, Write};
 use async_std::prelude::*;
 use async_std::stream::Stream;
 use async_std::sync::Arc;
-use bytes::{BufMut, BytesMut};
 use futures::task::{Context, Poll};
 use imap_proto::{RequestId, Response};
 use nom::Needed;
