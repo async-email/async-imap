@@ -67,7 +67,7 @@ impl<R: Read + Unpin> ResponseStream<R> {
 
         let res = ResponseData::try_new(buf, |buf| {
             match imap_proto::parse_response(&buf[..n]) {
-                Ok((remaining, response)) => {
+                Ok((_remaining, response)) => {
                     // TODO: figure out if we can shrink to the minimum required size.
                     self.decode_needs = 0;
                     Ok(response)
@@ -79,7 +79,7 @@ impl<R: Read + Unpin> ResponseStream<R> {
                 Err(nom::Err::Incomplete(_)) => Err(None),
                 Err(err) => Err(Some(io::Error::new(
                     io::ErrorKind::Other,
-                    format!("{:?} during parsing of {:?}", err, buf),
+                    format!("{:?} during parsing of {:?}", err, &buf[..n]),
                 ))),
             }
         });
@@ -100,9 +100,11 @@ impl<R: Read + Unpin> Stream for ResponseStream<R> {
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = &mut *self;
 
+        let mut n = this.current;
+        this.current = 0;
         let buffer = std::mem::replace(&mut this.buffer, POOL.alloc(INITIAL_CAPACITY));
 
-        let mut buffer = match this.decode(buffer, this.current)? {
+        let mut buffer = match this.decode(buffer, n)? {
             DecodeResult::Some(item) => {
                 return Poll::Ready(Some(Ok(item)));
             }
@@ -110,16 +112,12 @@ impl<R: Read + Unpin> Stream for ResponseStream<R> {
         };
 
         loop {
-            if this.current >= buffer.capacity() {
+            if n >= buffer.capacity() {
                 // TODO: add max size
                 buffer.realloc(buffer.capacity() + 1024);
             }
 
-            let n = futures::ready!(
-                Pin::new(&mut this.inner).poll_read(cx, &mut buffer[this.current..])
-            )?;
-
-            this.current += n;
+            n += futures::ready!(Pin::new(&mut this.inner).poll_read(cx, &mut buffer[n..]))?;
 
             match this.decode(buffer, n)? {
                 DecodeResult::Some(item) => return Poll::Ready(Some(Ok(item))),
@@ -129,11 +127,13 @@ impl<R: Read + Unpin> Stream for ResponseStream<R> {
                     if this.buffer.is_empty() {
                         // put back the buffer to reuse it
                         std::mem::replace(&mut this.buffer, buffer);
+                        this.current = n;
 
                         return Poll::Ready(None);
                     } else if n == 0 {
                         // put back the buffer to reuse it
                         std::mem::replace(&mut this.buffer, buffer);
+                        this.current = n;
 
                         return Poll::Ready(Some(Err(io::Error::new(
                             io::ErrorKind::UnexpectedEof,
