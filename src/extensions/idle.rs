@@ -151,7 +151,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Handle<T> {
 
         let (waiter, interrupt) = self.wait();
         let fut = async move {
-            match async_std::future::timeout(timeout, async move { waiter.await }).await {
+            match async_std::future::timeout(timeout, waiter).await {
                 Ok(res) => res,
                 Err(_err) => IdleResponse::Timeout,
             }

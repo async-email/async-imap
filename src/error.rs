@@ -30,6 +30,8 @@ pub enum Error {
     /// Command inputs were not valid [IMAP
     /// strings](https://tools.ietf.org/html/rfc3501#section-4.3).
     Validate(ValidateError),
+    /// `native_tls` error
+    NativeTlsError(native_tls::Error),
     /// Error appending an e-mail.
     Append,
     #[doc(hidden)]
@@ -54,6 +56,12 @@ impl<'a> From<&'a Response<'a>> for Error {
     }
 }
 
+impl From<native_tls::Error> for Error {
+    fn from(err: native_tls::Error) -> Error {
+        Error::NativeTlsError(err)
+    }
+}
+
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
@@ -75,6 +83,7 @@ impl StdError for Error {
             Error::TlsHandshake(ref e) => e.description(),
             Error::Parse(ref e) => e.description(),
             Error::Validate(ref e) => e.description(),
+            Error::NativeTlsError(ref e) => e.description(),
             Error::Bad(_) => "Bad Response",
             Error::No(_) => "No Response",
             Error::ConnectionLost => "Connection lost",
