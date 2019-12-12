@@ -17,8 +17,6 @@ pub type Result<T> = result::Result<T, Error>;
 pub enum Error {
     /// An `io::Error` that occurred while trying to read or write to a network stream.
     Io(IoError),
-    /// An error from the `async_tls` library during the TLS handshake.
-    TlsHandshake(std::io::Error),
     /// A BAD response from the IMAP server.
     Bad(String),
     /// A NO response from the IMAP server.
@@ -58,7 +56,6 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             Error::Io(ref e) => fmt::Display::fmt(e, f),
-            Error::TlsHandshake(ref e) => fmt::Display::fmt(e, f),
             Error::Validate(ref e) => fmt::Display::fmt(e, f),
             Error::No(ref data) | Error::Bad(ref data) => {
                 write!(f, "{}: {}", &String::from(self.description()), data)
@@ -72,7 +69,6 @@ impl StdError for Error {
     fn description(&self) -> &str {
         match *self {
             Error::Io(ref e) => e.description(),
-            Error::TlsHandshake(ref e) => e.description(),
             Error::Parse(ref e) => e.description(),
             Error::Validate(ref e) => e.description(),
             Error::Bad(_) => "Bad Response",
@@ -86,7 +82,6 @@ impl StdError for Error {
     fn cause(&self) -> Option<&dyn StdError> {
         match *self {
             Error::Io(ref e) => Some(e),
-            Error::TlsHandshake(ref e) => Some(e),
             Error::Parse(ParseError::DataNotUtf8(_, ref e)) => Some(e),
             _ => None,
         }
