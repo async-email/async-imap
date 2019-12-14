@@ -1,7 +1,8 @@
-use crate::codec::ResponseData;
 use std::borrow::Cow;
 
 use imap_proto::{MailboxDatum, Response};
+
+use crate::types::ResponseData;
 
 rental! {
     pub mod rents {

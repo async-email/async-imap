@@ -84,21 +84,16 @@ extern crate pin_utils;
 #[macro_use]
 extern crate rental;
 
+mod authenticator;
+mod client;
+pub mod error;
+pub mod extensions;
+mod imap_stream;
 mod parse;
-
 pub mod types;
 
-mod authenticator;
 pub use crate::authenticator::Authenticator;
-
-mod client;
 pub use crate::client::*;
-
-pub mod error;
-
-pub mod extensions;
 
 #[cfg(test)]
 mod mock_stream;
-
-mod codec;

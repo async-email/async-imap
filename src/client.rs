@@ -17,8 +17,8 @@ use super::authenticator::Authenticator;
 use super::error::{Error, ParseError, Result, ValidateError};
 use super::parse::*;
 use super::types::*;
-use crate::codec::{IdGenerator, Request, ResponseData, ResponseStream};
 use crate::extensions;
+use crate::imap_stream::ImapStream;
 
 macro_rules! quote {
     ($x:expr) => {
@@ -64,7 +64,7 @@ pub struct Client<T: Read + Write + Unpin + fmt::Debug> {
 #[derive(Debug)]
 #[doc(hidden)]
 pub struct Connection<T: Read + Write + Unpin + fmt::Debug> {
-    pub(crate) stream: ResponseStream<T>,
+    pub(crate) stream: ImapStream<T>,
 
     /// Enable debug mode for this connection so that all client-server interactions are printed to
     /// `STDERR`.
@@ -185,7 +185,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Client<T> {
     /// This method primarily exists for writing tests that mock the underlying transport, but can
     /// also be used to support IMAP over custom tunnels.
     pub fn new(stream: T) -> Client<T> {
-        let stream = ResponseStream::new(stream);
+        let stream = ImapStream::new(stream);
 
         Client {
             conn: Connection {
@@ -350,7 +350,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Client<T> {
 impl<T: Read + Write + Unpin + fmt::Debug> Session<T> {
     unsafe_pinned!(conn: Connection<T>);
 
-    pub(crate) fn get_stream(self: Pin<&mut Self>) -> Pin<&mut ResponseStream<T>> {
+    pub(crate) fn get_stream(self: Pin<&mut Self>) -> Pin<&mut ImapStream<T>> {
         self.conn().stream()
     }
 
@@ -1273,7 +1273,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Session<T> {
 }
 
 impl<T: Read + Write + Unpin + fmt::Debug> Connection<T> {
-    unsafe_pinned!(stream: ResponseStream<T>);
+    unsafe_pinned!(stream: ImapStream<T>);
 
     /// Read the next response on the connection.
     pub async fn read_response(&mut self) -> Option<io::Result<ResponseData>> {

@@ -6,9 +6,9 @@ use async_std::stream::Stream;
 use async_std::sync;
 use imap_proto::{self, MailboxDatum, RequestId, Response};
 
-use super::error::{Error, Result};
-use super::types::*;
-use crate::codec::ResponseData;
+use crate::error::{Error, Result};
+use crate::types::ResponseData;
+use crate::types::*;
 
 pub(crate) fn parse_names<'a, T: Stream<Item = io::Result<ResponseData>> + Unpin>(
     stream: &'a mut T,
@@ -323,7 +323,7 @@ mod tests {
     fn input_stream(data: &[&str]) -> Vec<io::Result<ResponseData>> {
         data.iter()
             .map(|line| {
-                let mut block = crate::codec::POOL.alloc(line.as_bytes().len());
+                let mut block = crate::imap_stream::POOL.alloc(line.as_bytes().len());
                 block.copy_from_slice(line.as_bytes());
                 ResponseData::try_new(block, |bytes| -> io::Result<_> {
                     let (remaining, response) = imap_proto::parse_response(bytes).unwrap();

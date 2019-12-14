@@ -2,8 +2,6 @@
 
 use std::borrow::Cow;
 
-use crate::codec::ResponseData;
-
 /// From section [2.3.1.1 of RFC 3501](https://tools.ietf.org/html/rfc3501#section-2.3.1.1).
 ///
 /// A 32-bit value assigned to each message, which when used with the unique identifier validity
@@ -205,6 +203,15 @@ pub use self::capabilities::{Capabilities, Capability};
 
 /// re-exported from imap_proto;
 pub use imap_proto::StatusAttribute;
+
+mod id_generator;
+pub(crate) use self::id_generator::IdGenerator;
+
+mod response_data;
+pub(crate) use self::response_data::ResponseData;
+
+mod request;
+pub(crate) use self::request::Request;
 
 /// Responses that the server sends that are not related to the current command.
 /// [RFC 3501](https://tools.ietf.org/html/rfc3501#section-7) states that clients need to be able

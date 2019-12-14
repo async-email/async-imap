@@ -1,10 +1,10 @@
-use super::{Flag, Seq, Uid};
 use chrono::{DateTime, FixedOffset};
 use imap_proto::types::{
     AttributeValue, BodyStructure, Envelope, MessageSection, Response, SectionPath,
 };
 
-use crate::codec::ResponseData;
+use super::{Flag, Seq, Uid};
+use crate::types::ResponseData;
 
 /// Format of Date and Time as defined RFC3501.
 /// See `date-time` element in [Formal Syntax](https://tools.ietf.org/html/rfc3501#section-9)

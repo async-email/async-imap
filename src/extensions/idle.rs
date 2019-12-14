@@ -11,9 +11,9 @@ use futures::task::{Context, Poll};
 use imap_proto::{RequestId, Response, Status};
 
 use crate::client::Session;
-use crate::codec::ResponseData;
 use crate::error::Result;
 use crate::parse::handle_unilateral;
+use crate::types::ResponseData;
 
 /// `Handle` allows a client to block waiting for changes to the remote mailbox.
 ///
