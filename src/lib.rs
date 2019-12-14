@@ -76,7 +76,7 @@
 //! Even without `native_tls`, you can still use TLS by leveraging the pure Rust `rustls`
 //! crate. See the example/rustls.rs file for a working example.
 #![warn(missing_docs)]
-#![deny(rust_2018_idioms)]
+#![deny(rust_2018_idioms, unsafe_code)]
 
 #[macro_use]
 extern crate pin_utils;
