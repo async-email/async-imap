@@ -14,23 +14,32 @@ const INITIAL_CAPACITY: usize = 1024 * 4;
 const MAX_CAPACITY: usize = 512 * 1024 * 1024; // 512 MiB
 
 lazy_static::lazy_static! {
+    /// The global buffer pool we use for storing incoming data.
     pub(crate) static ref POOL: Arc<BytePool> = Arc::new(BytePool::new());
 }
 
+/// Wraps a stream, and parses incoming data as imap server messages. Writes outgoing data
+/// as imap client messages.
 #[derive(Debug)]
-pub struct ImapStream<R: Read> {
+pub struct ImapStream<R: Read + Write> {
     // TODO: write some buffering logic
+    /// The underlying stream
     pub(crate) inner: R,
+    /// Buffer for the already read, but not yet parsed data.
     buffer: Block<'static>,
     /// Position of valid read data into buffer.
     current: (usize, usize),
+    /// How many bytes do we need to finishe the currrent element that is being decoded.
     decode_needs: usize,
 }
 
 enum DecodeResult {
     Some {
+        /// The parsed response.
         response: ResponseData,
+        /// Remaining data.
         buffer: Block<'static>,
+        /// How many bytes are actually valid data in `buffer`.
         used: usize,
     },
     None(Block<'static>),
@@ -63,7 +72,7 @@ impl<R: Read + Write + Unpin> ImapStream<R> {
     }
 }
 
-impl<R: Read + Unpin> ImapStream<R> {
+impl<R: Read + Write + Unpin> ImapStream<R> {
     fn decode(
         &mut self,
         buf: Block<'static>,
@@ -116,7 +125,7 @@ impl<R: Read + Unpin> ImapStream<R> {
     }
 }
 
-impl<R: Read + Unpin> Stream for ImapStream<R> {
+impl<R: Read + Write + Unpin> Stream for ImapStream<R> {
     type Item = io::Result<ResponseData>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
