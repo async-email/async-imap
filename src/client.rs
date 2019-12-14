@@ -9,8 +9,6 @@ use async_std::io::{self, Read, Write};
 use async_std::net::{TcpStream, ToSocketAddrs};
 use async_std::prelude::*;
 use async_std::sync;
-use async_std::sync::Arc;
-use futures::SinkExt;
 use imap_proto::{RequestId, Response};
 
 use super::authenticator::Authenticator;
@@ -121,7 +119,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> DerefMut for Session<T> {
 /// # fn main() -> async_imap::error::Result<()> {
 /// # async_std::task::block_on(async {
 ///
-/// let tls = async_tls::TlsConnector::new();
+/// let tls = native_tls::TlsConnector::builder().build().unwrap().into();
 /// let client = async_imap::connect(("imap.example.org", 993), "imap.example.org", &tls).await?;
 ///
 /// # Ok(())
@@ -207,7 +205,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Client<T> {
     /// # fn main() -> async_imap::error::Result<()> {
     /// # async_std::task::block_on(async {
     ///
-    /// let tls = async_tls::TlsConnector::new();
+    /// let tls = native_tls::TlsConnector::builder().build().unwrap().into();
     /// let client = async_imap::connect(
     ///     ("imap.example.org", 993),
     ///     "imap.example.org",
@@ -272,7 +270,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Client<T> {
     ///     };
     ///
     ///     let domain = "imap.example.com";
-    ///     let tls = async_tls::TlsConnector::new();
+    ///     let tls = native_tls::TlsConnector::builder().build().unwrap().into();
     ///     let client = async_imap::connect((domain, 993), domain, &tls).await?;
     ///     match client.authenticate("XOAUTH2", &auth).await {
     ///         Ok(session) => {
@@ -1416,8 +1414,8 @@ mod tests {
                         * 2 FETCH (BODY[TEXT] {3}\r\nfoo)\r\n\
                         a0 OK FETCH completed\r\n";
         let mut session = mock_session!(MockStream::new(response.as_bytes().to_vec()));
-        session.read_response().await.unwrap();
-        session.read_response().await.unwrap();
+        session.read_response().await.unwrap().unwrap();
+        session.read_response().await.unwrap().unwrap();
     }
 
     #[async_attributes::test]
