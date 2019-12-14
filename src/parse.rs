@@ -51,7 +51,7 @@ fn filter_sync(res: &io::Result<ResponseData>, command_tag: &RequestId) -> bool 
             Response::Done { tag, .. } => tag != command_tag,
             _ => true,
         },
-        Err(err) => false,
+        Err(_err) => false,
     }
 }
 
@@ -168,91 +168,80 @@ pub(crate) async fn parse_mailbox<T: Stream<Item = io::Result<ResponseData>> + U
         .next()
         .await
     {
-        unimplemented!()
-        //     let ResponseData { response, raw } = resp;
-        //     match response {
-        //         Response::Data {
-        //             status,
-        //             code,
-        //             information,
-        //         } => {
-        //             use imap_proto::Status;
+        let resp = resp?;
+        match resp.parsed() {
+            Response::Data {
+                status,
+                code,
+                information,
+            } => {
+                use imap_proto::Status;
 
-        //             match status {
-        //                 Status::Ok => {
-        //                     use imap_proto::ResponseCode;
-        //                     match code {
-        //                         Some(ResponseCode::UidValidity(uid)) => {
-        //                             mailbox.uid_validity = Some(uid);
-        //                         }
-        //                         Some(ResponseCode::UidNext(unext)) => {
-        //                             mailbox.uid_next = Some(unext);
-        //                         }
-        //                         Some(ResponseCode::Unseen(n)) => {
-        //                             mailbox.unseen = Some(n);
-        //                         }
-        //                         Some(ResponseCode::PermanentFlags(flags)) => {
-        //                             mailbox
-        //                                 .permanent_flags
-        //                                 .extend(flags.iter().map(|s| (*s).to_string()).map(Flag::from));
-        //                         }
-        //                         _ => {}
-        //                     }
-        //                 }
-        //                 Status::Bad => {
-        //                     return Err(Error::Bad(format!(
-        //                         "code: {:?}, info: {:?}",
-        //                         code, information
-        //                     )))
-        //                 }
-        //                 Status::No => {
-        //                     return Err(Error::No(format!(
-        //                         "code: {:?}, info: {:?}",
-        //                         code, information
-        //                     )))
-        //                 }
-        //                 _ => {
-        //                     return Err(Error::Io(io::Error::new(
-        //                         io::ErrorKind::Other,
-        //                         format!(
-        //                             "status: {:?}, code: {:?}, information: {:?}",
-        //                             status, code, information
-        //                         ),
-        //                     )));
-        //                 }
-        //             }
-        //         }
-        //         Response::MailboxData(m) => match m {
-        //             MailboxDatum::Status { mailbox, status } => {
-        //                 unsolicited
-        //                     .send(UnsolicitedResponse::Status {
-        //                         mailbox: (*mailbox).into(),
-        //                         attributes: status,
-        //                     })
-        //                     .await;
-        //             }
-        //             MailboxDatum::Exists(e) => {
-        //                 mailbox.exists = e;
-        //             }
-        //             MailboxDatum::Recent(r) => {
-        //                 mailbox.recent = r;
-        //             }
-        //             MailboxDatum::Flags(flags) => {
-        //                 mailbox
-        //                     .flags
-        //                     .extend(flags.iter().map(|s| (*s).to_string()).map(Flag::from));
-        //             }
-        //             MailboxDatum::List { .. } => {}
-        //             MailboxDatum::MetadataSolicited { .. } => {}
-        //             MailboxDatum::MetadataUnsolicited { .. } => {}
-        //         },
-        //         Response::Expunge(n) => {
-        //             unsolicited.send(UnsolicitedResponse::Expunge(n)).await;
-        //         }
-        //         _ => {
-        //             // handle_unilateral(ResponseData { response, raw }, unsolicited.clone()).await;
-        //         }
-        //     }
+                match status {
+                    Status::Ok => {
+                        use imap_proto::ResponseCode;
+                        match code {
+                            Some(ResponseCode::UidValidity(uid)) => {
+                                mailbox.uid_validity = Some(*uid);
+                            }
+                            Some(ResponseCode::UidNext(unext)) => {
+                                mailbox.uid_next = Some(*unext);
+                            }
+                            Some(ResponseCode::Unseen(n)) => {
+                                mailbox.unseen = Some(*n);
+                            }
+                            Some(ResponseCode::PermanentFlags(flags)) => {
+                                mailbox
+                                    .permanent_flags
+                                    .extend(flags.iter().map(|s| (*s).to_string()).map(Flag::from));
+                            }
+                            _ => {}
+                        }
+                    }
+                    Status::Bad => {
+                        return Err(Error::Bad(format!(
+                            "code: {:?}, info: {:?}",
+                            code, information
+                        )))
+                    }
+                    Status::No => {
+                        return Err(Error::No(format!(
+                            "code: {:?}, info: {:?}",
+                            code, information
+                        )))
+                    }
+                    _ => {
+                        return Err(Error::Io(io::Error::new(
+                            io::ErrorKind::Other,
+                            format!(
+                                "status: {:?}, code: {:?}, information: {:?}",
+                                status, code, information
+                            ),
+                        )));
+                    }
+                }
+            }
+            Response::MailboxData(m) => match m {
+                MailboxDatum::Status { .. } => handle_unilateral(resp, unsolicited.clone()).await,
+                MailboxDatum::Exists(e) => {
+                    mailbox.exists = *e;
+                }
+                MailboxDatum::Recent(r) => {
+                    mailbox.recent = *r;
+                }
+                MailboxDatum::Flags(flags) => {
+                    mailbox
+                        .flags
+                        .extend(flags.iter().map(|s| (*s).to_string()).map(Flag::from));
+                }
+                MailboxDatum::List { .. } => {}
+                MailboxDatum::MetadataSolicited { .. } => {}
+                MailboxDatum::MetadataUnsolicited { .. } => {}
+            },
+            _ => {
+                handle_unilateral(resp, unsolicited.clone()).await;
+            }
+        }
     }
 
     Ok(mailbox)
@@ -292,33 +281,39 @@ pub(crate) async fn handle_unilateral(
     res: ResponseData,
     unsolicited: sync::Sender<UnsolicitedResponse>,
 ) {
-    unimplemented!()
-    // let ResponseData { raw, response } = res;
-
-    // match response {
-    //     Response::MailboxData(MailboxDatum::Status { mailbox, status }) => {
-    //         unsolicited
-    //             .send(UnsolicitedResponse::Status {
-    //                 mailbox: (*mailbox).into(),
-    //                 attributes: status,
-    //             })
-    //             .await;
-    //     }
-    //     Response::MailboxData(MailboxDatum::Recent(n)) => {
-    //         unsolicited.send(UnsolicitedResponse::Recent(n)).await;
-    //     }
-    //     Response::MailboxData(MailboxDatum::Exists(n)) => {
-    //         unsolicited.send(UnsolicitedResponse::Exists(n)).await;
-    //     }
-    //     Response::Expunge(n) => {
-    //         unsolicited.send(UnsolicitedResponse::Expunge(n)).await;
-    //     }
-    //     _ => {
-    //         unsolicited
-    //             .send(UnsolicitedResponse::Other(ResponseData { raw, response }))
-    //             .await;
-    //     }
-    // }
+    match res.parsed() {
+        Response::MailboxData(MailboxDatum::Status { mailbox, status }) => {
+            unsolicited
+                .send(UnsolicitedResponse::Status {
+                    mailbox: (*mailbox).into(),
+                    attributes: status
+                        .iter()
+                        .map(|s| match s {
+                            // Fake clone
+                            StatusAttribute::HighestModSeq(a) => StatusAttribute::HighestModSeq(*a),
+                            StatusAttribute::Messages(a) => StatusAttribute::Messages(*a),
+                            StatusAttribute::Recent(a) => StatusAttribute::Recent(*a),
+                            StatusAttribute::UidNext(a) => StatusAttribute::UidNext(*a),
+                            StatusAttribute::UidValidity(a) => StatusAttribute::UidValidity(*a),
+                            StatusAttribute::Unseen(a) => StatusAttribute::Unseen(*a),
+                        })
+                        .collect(),
+                })
+                .await;
+        }
+        Response::MailboxData(MailboxDatum::Recent(n)) => {
+            unsolicited.send(UnsolicitedResponse::Recent(*n)).await;
+        }
+        Response::MailboxData(MailboxDatum::Exists(n)) => {
+            unsolicited.send(UnsolicitedResponse::Exists(*n)).await;
+        }
+        Response::Expunge(n) => {
+            unsolicited.send(UnsolicitedResponse::Expunge(*n)).await;
+        }
+        _ => {
+            unsolicited.send(UnsolicitedResponse::Other(res)).await;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -327,17 +322,15 @@ mod tests {
 
     fn input_stream(data: &[&str]) -> Vec<io::Result<ResponseData>> {
         data.iter()
-            .map(|line| match imap_proto::parse_response(line.as_bytes()) {
-                Ok((remaining, response)) => {
-                    // let response = unsafe { std::mem::transmute(response) };
+            .map(|line| {
+                let mut block = crate::codec::POOL.alloc(line.as_bytes().len());
+                block.copy_from_slice(line.as_bytes());
+                ResponseData::try_new(block, |bytes| -> io::Result<_> {
+                    let (remaining, response) = imap_proto::parse_response(bytes).unwrap();
                     assert_eq!(remaining.len(), 0);
-                    unimplemented!()
-                    // ResponseData {
-                    //     raw: line.as_bytes().to_vec().into(),
-                    //     response,
-                    // }
-                }
-                Err(err) => panic!("invalid input: {:?}", err),
+                    Ok(response)
+                })
+                .map_err(|err: rental::RentalError<io::Error, _>| err.0)
             })
             .collect()
     }

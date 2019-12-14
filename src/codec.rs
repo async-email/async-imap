@@ -1,4 +1,3 @@
-use std::ops::Deref;
 use std::pin::Pin;
 
 use async_std::io::{self, Read, Write};
@@ -14,7 +13,7 @@ use byte_pool::{Block, BytePool};
 const INITIAL_CAPACITY: usize = 1024 * 4;
 
 lazy_static::lazy_static! {
-    static ref POOL: Arc<BytePool> = Arc::new(BytePool::new());
+    pub(crate) static ref POOL: Arc<BytePool> = Arc::new(BytePool::new());
 }
 
 #[derive(Debug)]
@@ -145,11 +144,6 @@ impl<R: Read + Unpin> Stream for ResponseStream<R> {
             }
         }
     }
-}
-
-#[derive(Debug)]
-pub struct ImapCodec {
-    decode_need_message_bytes: usize,
 }
 
 rental! {

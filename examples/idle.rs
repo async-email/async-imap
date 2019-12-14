@@ -72,8 +72,8 @@ async fn fetch_and_idle(imap_server: &str, login: &str, password: &str) -> Resul
             println!("-- IDLE timed out");
         }
         NewData(data) => {
-            // let s = String::from_utf8(data.raw.to_vec()).unwrap();
-            // println!("-- IDLE data:\n{}", s);
+            let s = String::from_utf8(data.head().to_vec()).unwrap();
+            println!("-- IDLE data:\n{}", s);
         }
     }
 
