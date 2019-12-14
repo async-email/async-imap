@@ -43,6 +43,7 @@ lettre_email = "0.9"
 rustls-connector = "0.8.0"
 rustls = { version = "0.16.0", features = ["dangerous_configuration"] }
 webpki = "0.21.0"
+pretty_assertions = "0.6.1"
 
 [[example]]
 name = "basic"

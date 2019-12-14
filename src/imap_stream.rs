@@ -23,12 +23,16 @@ pub struct ImapStream<R: Read> {
     pub(crate) inner: R,
     buffer: Block<'static>,
     /// Position of valid read data into buffer.
-    current: usize,
+    current: (usize, usize),
     decode_needs: usize,
 }
 
 enum DecodeResult {
-    Some(ResponseData),
+    Some {
+        response: ResponseData,
+        buffer: Block<'static>,
+        used: usize,
+    },
     None(Block<'static>),
 }
 
@@ -38,7 +42,7 @@ impl<R: Read + Write + Unpin> ImapStream<R> {
         ImapStream {
             inner,
             buffer: POOL.alloc(INITIAL_CAPACITY),
-            current: 0,
+            current: (0, 0),
             decode_needs: 0,
         }
     }
@@ -60,16 +64,30 @@ impl<R: Read + Write + Unpin> ImapStream<R> {
 }
 
 impl<R: Read + Unpin> ImapStream<R> {
-    fn decode(&mut self, buf: Block<'static>, n: usize) -> io::Result<DecodeResult> {
-        if self.decode_needs > n {
+    fn decode(
+        &mut self,
+        buf: Block<'static>,
+        start: usize,
+        end: usize,
+    ) -> io::Result<DecodeResult> {
+        if self.decode_needs > end - start {
             return Ok(DecodeResult::None(buf));
         }
 
+        let mut rest = None;
+        let mut used = 0;
         let res = ResponseData::try_new(buf, |buf| {
-            match imap_proto::parse_response(&buf[..n]) {
-                Ok((_remaining, response)) => {
+            match imap_proto::parse_response(&buf[start..end]) {
+                Ok((remaining, response)) => {
                     // TODO: figure out if we can shrink to the minimum required size.
                     self.decode_needs = 0;
+
+                    let mut buf = POOL.alloc(std::cmp::max(remaining.len(), INITIAL_CAPACITY));
+                    buf[..remaining.len()].copy_from_slice(remaining);
+                    used = remaining.len();
+
+                    rest = Some(buf);
+
                     Ok(response)
                 }
                 Err(nom::Err::Incomplete(Needed::Size(min))) => {
@@ -79,13 +97,17 @@ impl<R: Read + Unpin> ImapStream<R> {
                 Err(nom::Err::Incomplete(_)) => Err(None),
                 Err(err) => Err(Some(io::Error::new(
                     io::ErrorKind::Other,
-                    format!("{:?} during parsing of {:?}", err, &buf[..n]),
+                    format!("{:?} during parsing of {:?}", err, &buf[start..end]),
                 ))),
             }
         });
 
         match res {
-            Ok(res) => Ok(DecodeResult::Some(res)),
+            Ok(response) => Ok(DecodeResult::Some {
+                response,
+                buffer: rest.unwrap(),
+                used,
+            }),
             Err(rental::RentalError(err, buf)) => match err {
                 Some(err) => Err(err),
                 None => Ok(DecodeResult::None(buf)),
@@ -101,18 +123,29 @@ impl<R: Read + Unpin> Stream for ImapStream<R> {
         let this = &mut *self;
 
         let mut n = this.current;
-        this.current = 0;
+        this.current = (0, 0);
         let buffer = std::mem::replace(&mut this.buffer, POOL.alloc(INITIAL_CAPACITY));
 
-        let mut buffer = match this.decode(buffer, n)? {
-            DecodeResult::Some(item) => {
-                return Poll::Ready(Some(Ok(item)));
+        let mut buffer = if (n.1 - n.0) > 0 {
+            match this.decode(buffer, n.0, n.1)? {
+                DecodeResult::Some {
+                    response,
+                    buffer,
+                    used,
+                } => {
+                    this.current = (0, used);
+                    std::mem::replace(&mut this.buffer, buffer);
+
+                    return Poll::Ready(Some(Ok(response)));
+                }
+                DecodeResult::None(buffer) => buffer,
             }
-            DecodeResult::None(buffer) => buffer,
+        } else {
+            buffer
         };
 
         loop {
-            if n >= buffer.capacity() {
+            if (n.1 - n.0) >= buffer.capacity() {
                 if buffer.capacity() + 1024 < MAX_CAPACITY {
                     buffer.realloc(buffer.capacity() + 1024);
                 } else {
@@ -123,20 +156,29 @@ impl<R: Read + Unpin> Stream for ImapStream<R> {
                 }
             }
 
-            n += futures::ready!(Pin::new(&mut this.inner).poll_read(cx, &mut buffer[n..]))?;
+            n.1 += futures::ready!(Pin::new(&mut this.inner).poll_read(cx, &mut buffer[n.1..]))?;
 
-            match this.decode(buffer, n)? {
-                DecodeResult::Some(item) => return Poll::Ready(Some(Ok(item))),
+            match this.decode(buffer, n.0, n.1)? {
+                DecodeResult::Some {
+                    response,
+                    buffer,
+                    used,
+                } => {
+                    this.current = (0, used);
+                    std::mem::replace(&mut this.buffer, buffer);
+
+                    return Poll::Ready(Some(Ok(response)));
+                }
                 DecodeResult::None(buf) => {
                     buffer = buf;
 
-                    if this.buffer.is_empty() {
+                    if this.buffer.is_empty() || (n.0 == 0 && n.1 == 0) {
                         // put back the buffer to reuse it
                         std::mem::replace(&mut this.buffer, buffer);
                         this.current = n;
 
                         return Poll::Ready(None);
-                    } else if n == 0 {
+                    } else if (n.1 - n.0) == 0 {
                         // put back the buffer to reuse it
                         std::mem::replace(&mut this.buffer, buffer);
                         this.current = n;
@@ -144,8 +186,7 @@ impl<R: Read + Unpin> Stream for ImapStream<R> {
                         return Poll::Ready(Some(Err(io::Error::new(
                             io::ErrorKind::UnexpectedEof,
                             "bytes remaining in stream",
-                        )
-                        .into())));
+                        ))));
                     }
                 }
             }

@@ -1379,6 +1379,8 @@ fn validate_str(value: &str) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
+    use pretty_assertions::assert_eq;
+
     use super::super::error::Result;
     use super::super::mock_stream::MockStream;
     use super::*;
@@ -1441,7 +1443,9 @@ mod tests {
     async fn readline_eof() {
         let mock_stream = MockStream::default().with_eof();
         let mut client = mock_client!(mock_stream);
-        assert!(client.read_response().await.is_none());
+        let res = client.read_response().await;
+        println!("{:?}", res);
+        assert!(res.is_none());
     }
 
     #[async_attributes::test]
