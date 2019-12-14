@@ -11,6 +11,7 @@ use nom::Needed;
 use crate::types::{Request, ResponseData};
 
 const INITIAL_CAPACITY: usize = 1024 * 4;
+const MAX_CAPACITY: usize = 512 * 1024 * 1024; // 512 MiB
 
 lazy_static::lazy_static! {
     pub(crate) static ref POOL: Arc<BytePool> = Arc::new(BytePool::new());
@@ -112,8 +113,14 @@ impl<R: Read + Unpin> Stream for ImapStream<R> {
 
         loop {
             if n >= buffer.capacity() {
-                // TODO: add max size
-                buffer.realloc(buffer.capacity() + 1024);
+                if buffer.capacity() + 1024 < MAX_CAPACITY {
+                    buffer.realloc(buffer.capacity() + 1024);
+                } else {
+                    return Poll::Ready(Some(Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "incoming data too large",
+                    ))));
+                }
             }
 
             n += futures::ready!(Pin::new(&mut this.inner).poll_read(cx, &mut buffer[n..]))?;
