@@ -74,9 +74,8 @@ fn smtp(user: &str) -> lettre::SmtpTransport {
     .transport()
 }
 
-#[ignore]
-#[test]
-fn connect_insecure_then_secure() {
+// #[test]
+fn _connect_insecure_then_secure() {
     task::block_on(async {
         let host = std::env::var("TEST_HOST").unwrap_or("127.0.0.1".to_string());
         let stream = TcpStream::connect((host.as_ref(), 3143)).await.unwrap();
@@ -90,6 +89,7 @@ fn connect_insecure_then_secure() {
 }
 
 #[test]
+#[ignore]
 fn connect_secure() {
     task::block_on(async {
         async_imap::connect(
@@ -106,6 +106,7 @@ fn connect_secure() {
 }
 
 #[test]
+#[ignore]
 fn login() {
     task::block_on(async {
         session("readonly-test@localhost").await;
@@ -113,6 +114,7 @@ fn login() {
 }
 
 #[test]
+#[ignore]
 fn logout() {
     task::block_on(async {
         let mut s = session("readonly-test@localhost").await;
@@ -121,6 +123,7 @@ fn logout() {
 }
 
 #[test]
+#[ignore]
 fn inbox_zero() {
     task::block_on(async {
         // https://github.com/greenmail-mail-test/greenmail/issues/265
@@ -132,6 +135,7 @@ fn inbox_zero() {
 }
 
 #[test]
+#[ignore]
 fn inbox() {
     task::block_on(async {
         let to = "inbox@localhost";
@@ -221,6 +225,7 @@ fn inbox() {
 }
 
 #[test]
+#[ignore]
 fn inbox_uid() {
     task::block_on(async {
         let to = "inbox-uid@localhost";
@@ -291,9 +296,8 @@ fn inbox_uid() {
     });
 }
 
-#[test]
-#[ignore]
-fn list() {
+// #[test]
+fn _list() {
     task::block_on(async {
         let mut s = session("readonly-test@localhost").await;
         s.select("INBOX").await.unwrap();
@@ -304,9 +308,9 @@ fn list() {
     });
 }
 
-#[test]
-#[ignore] // Greenmail does not support IDLE :(
-fn idle() -> async_imap::error::Result<()> {
+// Greenmail does not support IDLE :(
+// #[test]
+fn _idle() -> async_imap::error::Result<()> {
     task::block_on(async {
         let mut session = session("idle-test@localhost").await;
 
