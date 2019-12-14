@@ -21,7 +21,7 @@
 //!
 //! async fn fetch_inbox_top() -> Result<Option<String>> {
 //!     let domain = "imap.example.com";
-//!     let tls = async_tls::TlsConnector::new();
+//!     let tls = native_tls::TlsConnector::builder().build().unwrap().into();
 //!
 //!     // we pass in the domain twice to check that the server's TLS
 //!     // certificate is valid for the domain we're connecting to.
@@ -76,7 +76,7 @@
 //! Even without `native_tls`, you can still use TLS by leveraging the pure Rust `rustls`
 //! crate. See the example/rustls.rs file for a working example.
 #![warn(missing_docs)]
-#![deny(rust_2018_idioms)]
+#![deny(rust_2018_idioms, unsafe_code)]
 
 #[macro_use]
 extern crate pin_utils;
@@ -84,21 +84,16 @@ extern crate pin_utils;
 #[macro_use]
 extern crate rental;
 
+mod authenticator;
+mod client;
+pub mod error;
+pub mod extensions;
+mod imap_stream;
 mod parse;
-
 pub mod types;
 
-mod authenticator;
 pub use crate::authenticator::Authenticator;
-
-mod client;
 pub use crate::client::*;
-
-pub mod error;
-
-pub mod extensions;
 
 #[cfg(test)]
 mod mock_stream;
-
-mod codec;

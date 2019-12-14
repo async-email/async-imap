@@ -30,12 +30,12 @@ async-native-tls = "0.1.1"
 native-tls = "0.2.3"
 async-std = { version = "1.0", features = ["unstable"] }
 pin-utils = "0.1.0-alpha.4"
-futures_codec = "0.3"
-bytes = "0.4.12"
 futures = "0.3.0"
 async-attributes = "1.1.0"
 rental = "0.5.5"
 stop-token = { version = "0.1.1", features = ["unstable"] }
+byte-pool = "0.2.1"
+lazy_static = "1.4.0"
 
 [dev-dependencies]
 lettre = "0.9"
@@ -43,6 +43,7 @@ lettre_email = "0.9"
 rustls-connector = "0.8.0"
 rustls = { version = "0.16.0", features = ["dangerous_configuration"] }
 webpki = "0.21.0"
+pretty_assertions = "0.6.1"
 
 [[example]]
 name = "basic"

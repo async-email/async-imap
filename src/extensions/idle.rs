@@ -11,9 +11,9 @@ use futures::task::{Context, Poll};
 use imap_proto::{RequestId, Response, Status};
 
 use crate::client::Session;
-use crate::codec::ResponseData;
 use crate::error::Result;
 use crate::parse::handle_unilateral;
+use crate::types::ResponseData;
 
 /// `Handle` allows a client to block waiting for changes to the remote mailbox.
 ///
@@ -39,7 +39,7 @@ pub struct Handle<T: Read + Write + Unpin + fmt::Debug> {
 impl<T: Read + Write + Unpin + fmt::Debug> Unpin for Handle<T> {}
 
 impl<T: Read + Write + Unpin + fmt::Debug> Stream for Handle<T> {
-    type Item = ResponseData;
+    type Item = io::Result<ResponseData>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.as_mut().session().get_stream().poll_next(cx)
@@ -100,7 +100,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Handle<T> {
     pub fn wait(
         &mut self,
     ) -> (
-        impl Future<Output = IdleResponse> + '_,
+        impl Future<Output = Result<IdleResponse>> + '_,
         stop_token::StopSource,
     ) {
         assert!(
@@ -115,6 +115,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Handle<T> {
 
         let fut = async move {
             while let Some(resp) = interruptible_stream.next().await {
+                let resp = resp?;
                 match resp.parsed() {
                     Response::Data { status, .. } if status == &Status::Ok => {
                         // all good continue
@@ -125,11 +126,11 @@ impl<T: Read + Write + Unpin + fmt::Debug> Handle<T> {
                     Response::Done { .. } => {
                         handle_unilateral(resp, sender.clone()).await;
                     }
-                    _ => return IdleResponse::NewData(resp),
+                    _ => return Ok(IdleResponse::NewData(resp)),
                 }
             }
 
-            IdleResponse::Timeout
+            Ok(IdleResponse::Timeout)
         };
 
         (fut, interrupt)
@@ -141,7 +142,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Handle<T> {
         &mut self,
         timeout: Duration,
     ) -> (
-        impl Future<Output = IdleResponse> + '_,
+        impl Future<Output = Result<IdleResponse>> + '_,
         stop_token::StopSource,
     ) {
         assert!(
@@ -153,7 +154,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Handle<T> {
         let fut = async move {
             match async_std::future::timeout(timeout, waiter).await {
                 Ok(res) => res,
-                Err(_err) => IdleResponse::Timeout,
+                Err(_err) => Ok(IdleResponse::Timeout),
             }
         };
 
@@ -165,6 +166,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Handle<T> {
         let id = self.session.run_command("IDLE").await?;
         self.id = Some(id);
         while let Some(res) = self.session.stream.next().await {
+            let res = res?;
             match res.parsed() {
                 Response::Continue { .. } => {
                     return Ok(());

@@ -63,7 +63,7 @@ async fn fetch_and_idle(imap_server: &str, login: &str, password: &str) -> Resul
         drop(interrupt);
     });
 
-    let idle_result = idle_wait.await;
+    let idle_result = idle_wait.await?;
     match idle_result {
         ManualInterrupt => {
             println!("-- IDLE manually interrupted");
@@ -72,7 +72,7 @@ async fn fetch_and_idle(imap_server: &str, login: &str, password: &str) -> Resul
             println!("-- IDLE timed out");
         }
         NewData(data) => {
-            let s = String::from_utf8(data.raw.to_vec()).unwrap();
+            let s = String::from_utf8(data.head().to_vec()).unwrap();
             println!("-- IDLE data:\n{}", s);
         }
     }
