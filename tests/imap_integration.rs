@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use async_imap::Session;
+use async_native_tls::TlsConnector;
 use async_std::net::TcpStream;
 use async_std::prelude::*;
-use async_std::sync::Arc;
 use async_std::task;
 use lettre::Transport;
 
@@ -29,15 +29,16 @@ impl rustls::ServerCertVerifier for NoCertificateVerification {
     }
 }
 
-fn tls() -> async_tls::TlsConnector {
-    let mut config = rustls::ClientConfig::new();
-    config
-        .dangerous()
-        .set_certificate_verifier(Arc::new(NoCertificateVerification {}));
-    Arc::new(config).into()
+fn tls() -> TlsConnector {
+    native_tls::TlsConnector::builder()
+        .danger_accept_invalid_hostnames(true)
+        .danger_accept_invalid_certs(true)
+        .build()
+        .unwrap()
+        .into()
 }
 
-async fn session(user: &str) -> Session<async_tls::client::TlsStream<TcpStream>> {
+async fn session(user: &str) -> Session<async_native_tls::TlsStream<TcpStream>> {
     let mut s = async_imap::connect(
         &format!(
             "{}:3993",

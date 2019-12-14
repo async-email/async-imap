@@ -8,7 +8,9 @@ use async_std::io::{self, Read, Write};
 use async_std::net::{TcpStream, ToSocketAddrs};
 use async_std::prelude::*;
 use async_std::sync;
-use async_tls::{client::TlsStream, TlsConnector};
+
+use async_native_tls::{TlsConnector, TlsStream};
+
 use futures::SinkExt;
 use futures_codec::Framed;
 use imap_proto::{RequestId, Response};
@@ -133,8 +135,7 @@ pub async fn connect<A: ToSocketAddrs, S: AsRef<str>>(
     ssl_connector: &TlsConnector,
 ) -> Result<Client<TlsStream<TcpStream>>> {
     let stream = TcpStream::connect(addr).await?;
-    let handshake = ssl_connector.connect(domain.as_ref(), stream)?;
-    let ssl_stream = handshake.await?;
+    let ssl_stream = ssl_connector.connect(domain.as_ref(), stream).await?;
 
     let mut client = Client::new(ssl_stream);
     let _greeting = client.read_response().await.unwrap();
@@ -153,7 +154,7 @@ impl Client<TcpStream> {
     ) -> Result<Client<TlsStream<TcpStream>>> {
         self.run_command_and_check_ok("STARTTLS", None).await?;
         let ssl_stream = ssl_connector
-            .connect(domain.as_ref(), self.conn.stream.into_inner().release().0)?
+            .connect(domain.as_ref(), self.conn.stream.into_inner().release().0)
             .await?;
 
         let client = Client::new(ssl_stream);

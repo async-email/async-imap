@@ -18,7 +18,7 @@ fn main() -> Result<()> {
 }
 
 async fn fetch_inbox_top(imap_server: &str, login: &str, password: &str) -> Result<Option<String>> {
-    let tls = async_tls::TlsConnector::new();
+    let tls = native_tls::TlsConnector::new().unwrap().into();
 
     // we pass in the imap_server twice to check that the server's TLS
     // certificate is valid for the imap_server we're connecting to.
