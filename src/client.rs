@@ -72,9 +72,6 @@ pub struct Connection<T: Read + Write + Unpin + fmt::Debug> {
     /// `STDERR`.
     pub debug: bool,
 
-    /// Tracks if we have read a greeting.
-    pub greeting_read: bool,
-
     /// Manages the request ids.
     pub(crate) request_ids: IdGenerator,
 }
@@ -138,7 +135,14 @@ pub async fn connect<A: ToSocketAddrs, S: AsRef<str>>(
     let ssl_stream = ssl_connector.connect(domain.as_ref(), stream).await?;
 
     let mut client = Client::new(ssl_stream);
-    let _greeting = client.read_response().await.unwrap();
+    let _greeting = match client.read_response().await {
+        Some(greeting) => greeting,
+        None => {
+            return Err(Error::Bad(format!(
+                "could not read server Greeting after connect"
+            )));
+        }
+    };
 
     Ok(client)
 }
@@ -193,7 +197,6 @@ impl<T: Read + Write + Unpin + fmt::Debug> Client<T> {
             conn: Connection {
                 stream: ConnStream::new(framed),
                 debug: false,
-                greeting_read: false,
                 request_ids: IdGenerator::new(),
             },
         }
