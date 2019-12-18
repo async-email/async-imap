@@ -1819,32 +1819,28 @@ mod tests {
 
     #[async_attributes::test]
     async fn store() {
-        generic_store(" ", |c, set, query| {
-            async move {
-                c.lock()
-                    .await
-                    .store(set, query)
-                    .await?
-                    .collect::<Vec<_>>()
-                    .await;
-                Ok(())
-            }
+        generic_store(" ", |c, set, query| async move {
+            c.lock()
+                .await
+                .store(set, query)
+                .await?
+                .collect::<Vec<_>>()
+                .await;
+            Ok(())
         })
         .await;
     }
 
     #[async_attributes::test]
     async fn uid_store() {
-        generic_store(" UID ", |c, set, query| {
-            async move {
-                c.lock()
-                    .await
-                    .uid_store(set, query)
-                    .await?
-                    .collect::<Vec<_>>()
-                    .await;
-                Ok(())
-            }
+        generic_store(" UID ", |c, set, query| async move {
+            c.lock()
+                .await
+                .uid_store(set, query)
+                .await?
+                .collect::<Vec<_>>()
+                .await;
+            Ok(())
         })
         .await;
     }
@@ -1864,22 +1860,18 @@ mod tests {
 
     #[async_attributes::test]
     async fn copy() {
-        generic_copy(" ", |c, set, query| {
-            async move {
-                c.lock().await.copy(set, query).await?;
-                Ok(())
-            }
+        generic_copy(" ", |c, set, query| async move {
+            c.lock().await.copy(set, query).await?;
+            Ok(())
         })
         .await;
     }
 
     #[async_attributes::test]
     async fn uid_copy() {
-        generic_copy(" UID ", |c, set, query| {
-            async move {
-                c.lock().await.uid_copy(set, query).await?;
-                Ok(())
-            }
+        generic_copy(" UID ", |c, set, query| async move {
+            c.lock().await.uid_copy(set, query).await?;
+            Ok(())
         })
         .await;
     }
@@ -1938,33 +1930,29 @@ mod tests {
 
     #[async_attributes::test]
     async fn fetch() {
-        generic_fetch(" ", |c, seq, query| {
-            async move {
-                c.lock()
-                    .await
-                    .fetch(seq, query)
-                    .await?
-                    .collect::<Vec<_>>()
-                    .await;
+        generic_fetch(" ", |c, seq, query| async move {
+            c.lock()
+                .await
+                .fetch(seq, query)
+                .await?
+                .collect::<Vec<_>>()
+                .await;
 
-                Ok(())
-            }
+            Ok(())
         })
         .await;
     }
 
     #[async_attributes::test]
     async fn uid_fetch() {
-        generic_fetch(" UID ", |c, seq, query| {
-            async move {
-                c.lock()
-                    .await
-                    .uid_fetch(seq, query)
-                    .await?
-                    .collect::<Vec<_>>()
-                    .await;
-                Ok(())
-            }
+        generic_fetch(" UID ", |c, seq, query| async move {
+            c.lock()
+                .await
+                .uid_fetch(seq, query)
+                .await?
+                .collect::<Vec<_>>()
+                .await;
+            Ok(())
         })
         .await;
     }
