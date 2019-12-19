@@ -68,9 +68,6 @@ pub struct Connection<T: Read + Write + Unpin + fmt::Debug> {
     /// `STDERR`.
     pub debug: bool,
 
-    /// Tracks if we have read a greeting.
-    pub greeting_read: bool,
-
     /// Manages the request ids.
     pub(crate) request_ids: IdGenerator,
 }
@@ -134,7 +131,14 @@ pub async fn connect<A: ToSocketAddrs, S: AsRef<str>>(
     let ssl_stream = ssl_connector.connect(domain.as_ref(), stream).await?;
 
     let mut client = Client::new(ssl_stream);
-    let _greeting = client.read_response().await.unwrap();
+    let _greeting = match client.read_response().await {
+        Some(greeting) => greeting,
+        None => {
+            return Err(Error::Bad(format!(
+                "could not read server Greeting after connect"
+            )));
+        }
+    };
 
     Ok(client)
 }
@@ -189,7 +193,6 @@ impl<T: Read + Write + Unpin + fmt::Debug> Client<T> {
             conn: Connection {
                 stream,
                 debug: false,
-                greeting_read: false,
                 request_ids: IdGenerator::new(),
             },
         }
@@ -308,33 +311,34 @@ impl<T: Read + Write + Unpin + fmt::Debug> Client<T> {
         // explicit match blocks neccessary to convert error to tuple and not bind self too
         // early (see also comment on `login`)
         if let Some(res) = self.read_response().await {
+            // FIXME: Some servers will only send `+\r\n` need to handle that in imap_proto.
+            // https://github.com/djc/tokio-imap/issues/67
             match res {
-                Ok(res) => {
-                    // FIXME: Some servers will only send `+\r\n` need to handle that in imap_proto.
-                    match res.parsed() {
-                        Response::Continue { information, .. } if information.is_some() => {
-                            let text = information.unwrap();
-                            let challenge = ok_or_unauth_client_err!(
-                                base64::decode(text).map_err(|e| Error::Parse(
-                                    ParseError::Authentication(text.to_string(), Some(e))
-                                )),
-                                self
-                            );
-                            let raw_response = &authenticator.process(&challenge);
-                            let auth_response = base64::encode(raw_response);
-                            ok_or_unauth_client_err!(
-                                self.conn.run_command_untagged(&auth_response).await,
-                                self
-                            );
-                            Ok(Session::new(self.conn))
-                        }
-                        _ => {
-                            if self.read_response().await.is_some() {
-                                Ok(Session::new(self.conn))
-                            } else {
-                                Err((Error::ConnectionLost, self))
-                            }
-                        }
+                Response::Continue { information, .. } => {
+                    let challenge = if let Some(text) = information {
+                        ok_or_unauth_client_err!(
+                            base64::decode(text).map_err(|e| Error::Parse(
+                                ParseError::Authentication(text.to_string(), Some(e))
+                            )),
+                            self
+                        )
+                    } else {
+                        Vec::new()
+                    };
+                    let raw_response = &authenticator.process(&challenge);
+                    let auth_response = base64::encode(raw_response);
+
+                    ok_or_unauth_client_err!(
+                        self.conn.run_command_untagged(&auth_response).await,
+                        self
+                    );
+                    Ok(Session::new(self.conn))
+                }
+                _ => {
+                    if self.read_response().await.is_some() {
+                        Ok(Session::new(self.conn))
+                    } else {
+                        Err((Error::ConnectionLost, self))
                     }
                 }
                 Err(err) => Err((err.into(), self)),
@@ -1819,28 +1823,32 @@ mod tests {
 
     #[async_attributes::test]
     async fn store() {
-        generic_store(" ", |c, set, query| async move {
-            c.lock()
-                .await
-                .store(set, query)
-                .await?
-                .collect::<Vec<_>>()
-                .await;
-            Ok(())
+        generic_store(" ", |c, set, query| {
+            async move {
+                c.lock()
+                    .await
+                    .store(set, query)
+                    .await?
+                    .collect::<Vec<_>>()
+                    .await;
+                Ok(())
+            }
         })
         .await;
     }
 
     #[async_attributes::test]
     async fn uid_store() {
-        generic_store(" UID ", |c, set, query| async move {
-            c.lock()
-                .await
-                .uid_store(set, query)
-                .await?
-                .collect::<Vec<_>>()
-                .await;
-            Ok(())
+        generic_store(" UID ", |c, set, query| {
+            async move {
+                c.lock()
+                    .await
+                    .uid_store(set, query)
+                    .await?
+                    .collect::<Vec<_>>()
+                    .await;
+                Ok(())
+            }
         })
         .await;
     }
@@ -1860,18 +1868,22 @@ mod tests {
 
     #[async_attributes::test]
     async fn copy() {
-        generic_copy(" ", |c, set, query| async move {
-            c.lock().await.copy(set, query).await?;
-            Ok(())
+        generic_copy(" ", |c, set, query| {
+            async move {
+                c.lock().await.copy(set, query).await?;
+                Ok(())
+            }
         })
         .await;
     }
 
     #[async_attributes::test]
     async fn uid_copy() {
-        generic_copy(" UID ", |c, set, query| async move {
-            c.lock().await.uid_copy(set, query).await?;
-            Ok(())
+        generic_copy(" UID ", |c, set, query| {
+            async move {
+                c.lock().await.uid_copy(set, query).await?;
+                Ok(())
+            }
         })
         .await;
     }
@@ -1930,29 +1942,33 @@ mod tests {
 
     #[async_attributes::test]
     async fn fetch() {
-        generic_fetch(" ", |c, seq, query| async move {
-            c.lock()
-                .await
-                .fetch(seq, query)
-                .await?
-                .collect::<Vec<_>>()
-                .await;
+        generic_fetch(" ", |c, seq, query| {
+            async move {
+                c.lock()
+                    .await
+                    .fetch(seq, query)
+                    .await?
+                    .collect::<Vec<_>>()
+                    .await;
 
-            Ok(())
+                Ok(())
+            }
         })
         .await;
     }
 
     #[async_attributes::test]
     async fn uid_fetch() {
-        generic_fetch(" UID ", |c, seq, query| async move {
-            c.lock()
-                .await
-                .uid_fetch(seq, query)
-                .await?
-                .collect::<Vec<_>>()
-                .await;
-            Ok(())
+        generic_fetch(" UID ", |c, seq, query| {
+            async move {
+                c.lock()
+                    .await
+                    .uid_fetch(seq, query)
+                    .await?
+                    .collect::<Vec<_>>()
+                    .await;
+                Ok(())
+            }
         })
         .await;
     }
