@@ -316,18 +316,22 @@ impl<T: Read + Write + Unpin + fmt::Debug> Client<T> {
         // early (see also comment on `login`)
         if let Some(res) = self.read_response().await {
             // FIXME: Some servers will only send `+\r\n` need to handle that in imap_proto.
+            // https://github.com/djc/tokio-imap/issues/67
             match res.parsed() {
-                Response::Continue { information, .. } if information.is_some() => {
-                    let text = information.unwrap();
-                    let challenge = ok_or_unauth_client_err!(
-                        base64::decode(text).map_err(|e| Error::Parse(ParseError::Authentication(
-                            text.to_string(),
-                            Some(e)
-                        ))),
-                        self
-                    );
+                Response::Continue { information, .. } => {
+                    let challenge = if let Some(text) = information {
+                        ok_or_unauth_client_err!(
+                            base64::decode(text).map_err(|e| Error::Parse(
+                                ParseError::Authentication(text.to_string(), Some(e))
+                            )),
+                            self
+                        )
+                    } else {
+                        Vec::new()
+                    };
                     let raw_response = &authenticator.process(&challenge);
                     let auth_response = base64::encode(raw_response);
+
                     ok_or_unauth_client_err!(
                         self.conn.run_command_untagged(&auth_response).await,
                         self

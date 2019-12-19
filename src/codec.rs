@@ -27,6 +27,10 @@ impl<'a> Decoder for ImapCodec {
     type Error = io::Error;
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, io::Error> {
+        if !buf.is_empty() {
+            log::trace!("< {:?}", std::str::from_utf8(&buf));
+        }
+
         if self.decode_need_message_bytes > buf.len() {
             return Ok(None);
         }
@@ -55,6 +59,7 @@ impl<'a> Decoder for ImapCodec {
 
         let raw = buf.split_to(rsp_len).freeze().to_vec();
         self.decode_need_message_bytes = 0;
+        log::trace!("< parsed: {:?}", response);
         Ok(Some(ResponseData { raw, response }))
     }
 }
@@ -64,6 +69,7 @@ impl Encoder for ImapCodec {
     type Error = io::Error;
 
     fn encode(&mut self, msg: Self::Item, dst: &mut BytesMut) -> Result<(), io::Error> {
+        log::trace!("> {:?}", msg);
         if let Some(tag) = msg.0 {
             // grow the buffer, as it does not grow automatically
             dst.reserve(tag.as_bytes().len() + 1);
