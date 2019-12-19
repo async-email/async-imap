@@ -313,7 +313,8 @@ impl<T: Read + Write + Unpin + fmt::Debug> Client<T> {
         if let Some(res) = self.read_response().await {
             // FIXME: Some servers will only send `+\r\n` need to handle that in imap_proto.
             // https://github.com/djc/tokio-imap/issues/67
-            match res {
+            let res = ok_or_unauth_client_err!(res.map_err(Into::into), self);
+            match res.parsed() {
                 Response::Continue { information, .. } => {
                     let challenge = if let Some(text) = information {
                         ok_or_unauth_client_err!(
@@ -341,7 +342,6 @@ impl<T: Read + Write + Unpin + fmt::Debug> Client<T> {
                         Err((Error::ConnectionLost, self))
                     }
                 }
-                Err(err) => Err((err.into(), self)),
             }
         } else {
             Err((Error::ConnectionLost, self))

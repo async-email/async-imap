@@ -57,6 +57,8 @@ impl<R: Read + Write + Unpin> ImapStream<R> {
     }
 
     pub async fn encode(&mut self, msg: Request) -> Result<(), io::Error> {
+        log::trace!("> {:?}", msg);
+
         if let Some(tag) = msg.0 {
             self.inner.write_all(tag.as_bytes()).await?;
             self.inner.write(b" ").await?;
@@ -82,6 +84,8 @@ impl<R: Read + Write + Unpin> ImapStream<R> {
         if self.decode_needs > end - start {
             return Ok(DecodeResult::None(buf));
         }
+
+        log::trace!("< {:?}", std::str::from_utf8(&buf[start..end]));
 
         let mut rest = None;
         let mut used = 0;
