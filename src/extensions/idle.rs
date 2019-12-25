@@ -130,7 +130,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Handle<T> {
                 }
             }
 
-            Ok(IdleResponse::Timeout)
+            Ok(IdleResponse::ManualInterrupt)
         };
 
         (fut, interrupt)
