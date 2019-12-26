@@ -59,22 +59,6 @@
 //!     Ok(Some(body))
 //! }
 //! ```
-//!
-//! ## Opting out of `native_tls`
-//!
-//! For situations where using openssl becomes problematic, you can disable the
-//! default feature which provides integration with the `native_tls` crate. One major
-//! reason you might want to do this is cross-compiling. To opt out of native_tls, add
-//! this to your Cargo.toml file:
-//!
-//! ```toml
-//! [dependencies.imap]
-//! version = "<some version>"
-//! default-features = false
-//! ```
-//!
-//! Even without `native_tls`, you can still use TLS by leveraging the pure Rust `rustls`
-//! crate. See the example/rustls.rs file for a working example.
 #![warn(missing_docs)]
 #![deny(rust_2018_idioms, unsafe_code)]
 
