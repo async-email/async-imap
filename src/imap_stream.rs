@@ -72,6 +72,15 @@ impl<R: Read + Write + Unpin> ImapStream<R> {
     pub fn into_inner(self) -> R {
         self.inner
     }
+
+    /// Flushes the underlying stream.
+    pub async fn flush(&mut self) -> Result<(), io::Error> {
+        self.inner.flush().await
+    }
+
+    pub fn as_mut(&mut self) -> &mut R {
+        &mut self.inner
+    }
 }
 
 impl<R: Read + Write + Unpin> ImapStream<R> {

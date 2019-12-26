@@ -134,9 +134,7 @@ pub async fn connect<A: ToSocketAddrs, S: AsRef<str>>(
     let _greeting = match client.read_response().await {
         Some(greeting) => greeting,
         None => {
-            return Err(Error::Bad(format!(
-                "could not read server Greeting after connect"
-            )));
+            return Err(Error::Bad("could not read server Greeting after connect"));
         }
     };
 
@@ -1142,28 +1140,32 @@ impl<T: Read + Write + Unpin + fmt::Debug> Session<T> {
     /// failing that, a `CHECK` command) after one or more `APPEND` commands.
     pub async fn append<S: AsRef<str>, B: AsRef<[u8]>>(
         &mut self,
-        _mailbox: S,
-        _content: B,
+        mailbox: S,
+        content: B,
     ) -> Result<()> {
-        unimplemented!();
-        // let content = content.as_ref();
-        // self.run_command(&format!(
-        //     "APPEND \"{}\" {{{}}}",
-        //     mailbox.as_ref(),
-        //     content.len()
-        // ))
-        // .await?;
-        // let mut v = Vec::new();
-        // self.readline(&mut v).await?;
-        // if !v.starts_with(b"+") {
-        //     return Err(Error::Append);
-        // }
-        // self.stream.write_all(content).await?;
-        // self.stream.write_all(b"\r\n").await?;
-        // self.stream.flush().await?;
-        // self.read_response().await?;
+        let content = content.as_ref();
+        self.run_command(&format!(
+            "APPEND \"{}\" {{{}}}",
+            mailbox.as_ref(),
+            content.len()
+        ))
+        .await?;
 
-        // Ok(())
+        match self.read_response().await {
+            Some(Ok(res)) => {
+                if let Response::Continue { .. } = res.parsed() {
+                    self.stream.as_mut().write_all(content).await?;
+                    self.stream.as_mut().write_all(b"\r\n").await?;
+                    self.stream.flush().await?;
+                    self.read_response().await.transpose()?;
+                    Ok(())
+                } else {
+                    Err(Error::Append)
+                }
+            }
+            Some(Err(err)) => Err(err.into()),
+            _ => Err(Error::Append),
+        }
     }
 
     /// The [`SEARCH` command](https://tools.ietf.org/html/rfc3501#section-6.4.4) searches the
@@ -1286,8 +1288,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Connection<T> {
         self.stream
             .encode(Request(None, command.as_bytes().into()))
             .await?;
-        // TODO
-        // self.stream.flush().await?;
+        self.stream.flush().await?;
         Ok(())
     }
 
@@ -1296,8 +1297,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Connection<T> {
         self.stream
             .encode(Request(Some(request_id.clone()), command.as_bytes().into()))
             .await?;
-        // TODO
-        // self.stream.flush().await?;
+        self.stream.flush().await?;
         Ok(request_id)
     }
 
@@ -1823,32 +1823,28 @@ mod tests {
 
     #[async_attributes::test]
     async fn store() {
-        generic_store(" ", |c, set, query| {
-            async move {
-                c.lock()
-                    .await
-                    .store(set, query)
-                    .await?
-                    .collect::<Vec<_>>()
-                    .await;
-                Ok(())
-            }
+        generic_store(" ", |c, set, query| async move {
+            c.lock()
+                .await
+                .store(set, query)
+                .await?
+                .collect::<Vec<_>>()
+                .await;
+            Ok(())
         })
         .await;
     }
 
     #[async_attributes::test]
     async fn uid_store() {
-        generic_store(" UID ", |c, set, query| {
-            async move {
-                c.lock()
-                    .await
-                    .uid_store(set, query)
-                    .await?
-                    .collect::<Vec<_>>()
-                    .await;
-                Ok(())
-            }
+        generic_store(" UID ", |c, set, query| async move {
+            c.lock()
+                .await
+                .uid_store(set, query)
+                .await?
+                .collect::<Vec<_>>()
+                .await;
+            Ok(())
         })
         .await;
     }
@@ -1868,22 +1864,18 @@ mod tests {
 
     #[async_attributes::test]
     async fn copy() {
-        generic_copy(" ", |c, set, query| {
-            async move {
-                c.lock().await.copy(set, query).await?;
-                Ok(())
-            }
+        generic_copy(" ", |c, set, query| async move {
+            c.lock().await.copy(set, query).await?;
+            Ok(())
         })
         .await;
     }
 
     #[async_attributes::test]
     async fn uid_copy() {
-        generic_copy(" UID ", |c, set, query| {
-            async move {
-                c.lock().await.uid_copy(set, query).await?;
-                Ok(())
-            }
+        generic_copy(" UID ", |c, set, query| async move {
+            c.lock().await.uid_copy(set, query).await?;
+            Ok(())
         })
         .await;
     }
@@ -1942,33 +1934,29 @@ mod tests {
 
     #[async_attributes::test]
     async fn fetch() {
-        generic_fetch(" ", |c, seq, query| {
-            async move {
-                c.lock()
-                    .await
-                    .fetch(seq, query)
-                    .await?
-                    .collect::<Vec<_>>()
-                    .await;
+        generic_fetch(" ", |c, seq, query| async move {
+            c.lock()
+                .await
+                .fetch(seq, query)
+                .await?
+                .collect::<Vec<_>>()
+                .await;
 
-                Ok(())
-            }
+            Ok(())
         })
         .await;
     }
 
     #[async_attributes::test]
     async fn uid_fetch() {
-        generic_fetch(" UID ", |c, seq, query| {
-            async move {
-                c.lock()
-                    .await
-                    .uid_fetch(seq, query)
-                    .await?
-                    .collect::<Vec<_>>()
-                    .await;
-                Ok(())
-            }
+        generic_fetch(" UID ", |c, seq, query| async move {
+            c.lock()
+                .await
+                .uid_fetch(seq, query)
+                .await?
+                .collect::<Vec<_>>()
+                .await;
+            Ok(())
         })
         .await;
     }
