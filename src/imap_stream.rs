@@ -109,10 +109,6 @@ impl<R: Read + Write + Unpin> ImapStream<R> {
         start: usize,
         end: usize,
     ) -> io::Result<DecodeResult> {
-        if self.decode_needs > end - start {
-            return Ok(DecodeResult::None(buf));
-        }
-
         log::trace!("< {:?}", std::str::from_utf8(&buf[start..end]));
 
         let mut rest = None;
@@ -186,9 +182,9 @@ impl<R: Read + Write + Unpin> Stream for ImapStream<R> {
         };
 
         loop {
-            if (n.1 - n.0) >= buffer.capacity() {
-                if buffer.capacity() + 1024 < MAX_CAPACITY {
-                    buffer.realloc(buffer.capacity() + 1024);
+            if (n.1 - n.0) + this.decode_needs >= buffer.capacity() {
+                if buffer.capacity() + this.decode_needs < MAX_CAPACITY {
+                    buffer.realloc(buffer.capacity() + this.decode_needs);
                 } else {
                     return Poll::Ready(Some(Err(io::Error::new(
                         io::ErrorKind::Other,
