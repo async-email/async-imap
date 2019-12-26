@@ -30,12 +30,9 @@ impl rustls::ServerCertVerifier for NoCertificateVerification {
 }
 
 fn tls() -> TlsConnector {
-    native_tls::TlsConnector::builder()
+    TlsConnector::new()
         .danger_accept_invalid_hostnames(true)
         .danger_accept_invalid_certs(true)
-        .build()
-        .unwrap()
-        .into()
 }
 
 async fn session(user: &str) -> Session<async_native_tls::TlsStream<TcpStream>> {
@@ -45,7 +42,7 @@ async fn session(user: &str) -> Session<async_native_tls::TlsStream<TcpStream>> 
             std::env::var("TEST_HOST").unwrap_or("127.0.0.1".to_string())
         ),
         "imap.example.com",
-        &tls(),
+        tls(),
     )
     .await
     .unwrap()
@@ -82,7 +79,7 @@ fn _connect_insecure_then_secure() {
 
         // ignored because of https://github.com/greenmail-mail-test/greenmail/issues/135
         async_imap::Client::new(stream)
-            .secure("imap.example.com", &tls())
+            .secure("imap.example.com", tls())
             .await
             .unwrap();
     });
@@ -98,7 +95,7 @@ fn connect_secure() {
                 std::env::var("TEST_HOST").unwrap_or("127.0.0.1".to_string())
             ),
             "imap.example.com",
-            &tls(),
+            tls(),
         )
         .await
         .unwrap();

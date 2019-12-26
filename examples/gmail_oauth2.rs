@@ -27,8 +27,8 @@ fn main() -> Result<()> {
         let domain = "imap.gmail.com";
         let port = 993;
         let socket_addr = (domain, port);
-        let tls = native_tls::TlsConnector::new().unwrap().into();
-        let client = async_imap::connect(socket_addr, domain, &tls).await?;
+        let tls = async_native_tls::TlsConnector::new();
+        let client = async_imap::connect(socket_addr, domain, tls).await?;
 
         let mut imap_session = match client.authenticate("XOAUTH2", &gmail_auth).await {
             Ok(c) => c,

@@ -21,11 +21,11 @@
 //!
 //! async fn fetch_inbox_top() -> Result<Option<String>> {
 //!     let domain = "imap.example.com";
-//!     let tls = native_tls::TlsConnector::builder().build().unwrap().into();
+//!     let tls = async_native_tls::TlsConnector::new();
 //!
 //!     // we pass in the domain twice to check that the server's TLS
 //!     // certificate is valid for the domain we're connecting to.
-//!     let client = async_imap::connect((domain, 993), domain, &tls).await?;
+//!     let client = async_imap::connect((domain, 993), domain, tls).await?;
 //!
 //!     // the client we have here is unauthenticated.
 //!     // to do anything useful with the e-mails, we need to log in

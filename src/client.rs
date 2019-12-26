@@ -116,8 +116,8 @@ impl<T: Read + Write + Unpin + fmt::Debug> DerefMut for Session<T> {
 /// # fn main() -> async_imap::error::Result<()> {
 /// # async_std::task::block_on(async {
 ///
-/// let tls = native_tls::TlsConnector::builder().build().unwrap().into();
-/// let client = async_imap::connect(("imap.example.org", 993), "imap.example.org", &tls).await?;
+/// let tls = async_native_tls::TlsConnector::new();
+/// let client = async_imap::connect(("imap.example.org", 993), "imap.example.org", tls).await?;
 ///
 /// # Ok(())
 /// # }) }
@@ -125,7 +125,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> DerefMut for Session<T> {
 pub async fn connect<A: ToSocketAddrs, S: AsRef<str>>(
     addr: A,
     domain: S,
-    ssl_connector: &TlsConnector,
+    ssl_connector: TlsConnector,
 ) -> Result<Client<TlsStream<TcpStream>>> {
     let stream = TcpStream::connect(addr).await?;
     let ssl_stream = ssl_connector.connect(domain.as_ref(), stream).await?;
@@ -134,7 +134,9 @@ pub async fn connect<A: ToSocketAddrs, S: AsRef<str>>(
     let _greeting = match client.read_response().await {
         Some(greeting) => greeting,
         None => {
-            return Err(Error::Bad("could not read server Greeting after connect"));
+            return Err(Error::Bad(
+                "could not read server Greeting after connect".into(),
+            ));
         }
     };
 
@@ -148,7 +150,7 @@ impl Client<TcpStream> {
     pub async fn secure<S: AsRef<str>>(
         mut self,
         domain: S,
-        ssl_connector: &TlsConnector,
+        ssl_connector: TlsConnector,
     ) -> Result<Client<TlsStream<TcpStream>>> {
         self.run_command_and_check_ok("STARTTLS", None).await?;
         let ssl_stream = ssl_connector
@@ -206,11 +208,11 @@ impl<T: Read + Write + Unpin + fmt::Debug> Client<T> {
     /// # fn main() -> async_imap::error::Result<()> {
     /// # async_std::task::block_on(async {
     ///
-    /// let tls = native_tls::TlsConnector::builder().build().unwrap().into();
+    /// let tls = async_native_tls::TlsConnector::new();
     /// let client = async_imap::connect(
     ///     ("imap.example.org", 993),
     ///     "imap.example.org",
-    ///     &tls
+    ///     tls
     /// ).await?;
     ///
     /// match client.login("user", "pass").await {
@@ -271,8 +273,8 @@ impl<T: Read + Write + Unpin + fmt::Debug> Client<T> {
     ///     };
     ///
     ///     let domain = "imap.example.com";
-    ///     let tls = native_tls::TlsConnector::builder().build().unwrap().into();
-    ///     let client = async_imap::connect((domain, 993), domain, &tls).await?;
+    ///     let tls = async_native_tls::TlsConnector::new();
+    ///     let client = async_imap::connect((domain, 993), domain, tls).await?;
     ///     match client.authenticate("XOAUTH2", &auth).await {
     ///         Ok(session) => {
     ///             // you are successfully authenticated!
@@ -1823,28 +1825,32 @@ mod tests {
 
     #[async_attributes::test]
     async fn store() {
-        generic_store(" ", |c, set, query| async move {
-            c.lock()
-                .await
-                .store(set, query)
-                .await?
-                .collect::<Vec<_>>()
-                .await;
-            Ok(())
+        generic_store(" ", |c, set, query| {
+            async move {
+                c.lock()
+                    .await
+                    .store(set, query)
+                    .await?
+                    .collect::<Vec<_>>()
+                    .await;
+                Ok(())
+            }
         })
         .await;
     }
 
     #[async_attributes::test]
     async fn uid_store() {
-        generic_store(" UID ", |c, set, query| async move {
-            c.lock()
-                .await
-                .uid_store(set, query)
-                .await?
-                .collect::<Vec<_>>()
-                .await;
-            Ok(())
+        generic_store(" UID ", |c, set, query| {
+            async move {
+                c.lock()
+                    .await
+                    .uid_store(set, query)
+                    .await?
+                    .collect::<Vec<_>>()
+                    .await;
+                Ok(())
+            }
         })
         .await;
     }
@@ -1864,18 +1870,22 @@ mod tests {
 
     #[async_attributes::test]
     async fn copy() {
-        generic_copy(" ", |c, set, query| async move {
-            c.lock().await.copy(set, query).await?;
-            Ok(())
+        generic_copy(" ", |c, set, query| {
+            async move {
+                c.lock().await.copy(set, query).await?;
+                Ok(())
+            }
         })
         .await;
     }
 
     #[async_attributes::test]
     async fn uid_copy() {
-        generic_copy(" UID ", |c, set, query| async move {
-            c.lock().await.uid_copy(set, query).await?;
-            Ok(())
+        generic_copy(" UID ", |c, set, query| {
+            async move {
+                c.lock().await.uid_copy(set, query).await?;
+                Ok(())
+            }
         })
         .await;
     }
@@ -1934,29 +1944,33 @@ mod tests {
 
     #[async_attributes::test]
     async fn fetch() {
-        generic_fetch(" ", |c, seq, query| async move {
-            c.lock()
-                .await
-                .fetch(seq, query)
-                .await?
-                .collect::<Vec<_>>()
-                .await;
+        generic_fetch(" ", |c, seq, query| {
+            async move {
+                c.lock()
+                    .await
+                    .fetch(seq, query)
+                    .await?
+                    .collect::<Vec<_>>()
+                    .await;
 
-            Ok(())
+                Ok(())
+            }
         })
         .await;
     }
 
     #[async_attributes::test]
     async fn uid_fetch() {
-        generic_fetch(" UID ", |c, seq, query| async move {
-            c.lock()
-                .await
-                .uid_fetch(seq, query)
-                .await?
-                .collect::<Vec<_>>()
-                .await;
-            Ok(())
+        generic_fetch(" UID ", |c, seq, query| {
+            async move {
+                c.lock()
+                    .await
+                    .uid_fetch(seq, query)
+                    .await?
+                    .collect::<Vec<_>>()
+                    .await;
+                Ok(())
+            }
         })
         .await;
     }

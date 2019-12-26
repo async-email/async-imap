@@ -29,7 +29,7 @@ pub enum Error {
     /// strings](https://tools.ietf.org/html/rfc3501#section-4.3).
     Validate(ValidateError),
     /// `native_tls` error
-    NativeTlsError(native_tls::Error),
+    NativeTlsError(async_native_tls::Error),
     /// Error appending an e-mail.
     Append,
     #[doc(hidden)]
@@ -54,8 +54,8 @@ impl<'a> From<&'a Response<'a>> for Error {
     }
 }
 
-impl From<native_tls::Error> for Error {
-    fn from(err: native_tls::Error) -> Error {
+impl From<async_native_tls::Error> for Error {
+    fn from(err: async_native_tls::Error) -> Error {
         Error::NativeTlsError(err)
     }
 }
