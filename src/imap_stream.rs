@@ -1,3 +1,4 @@
+use std::fmt;
 use std::pin::Pin;
 
 use async_std::io::{self, Read, Write};
@@ -43,6 +44,24 @@ enum DecodeResult {
         used: usize,
     },
     None(Block<'static>),
+}
+
+impl fmt::Debug for DecodeResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DecodeResult::Some {
+                response,
+                buffer,
+                used,
+            } => f
+                .debug_struct("DecodeResult::Some")
+                .field("response", response)
+                .field("block", &buffer.len())
+                .field("used", used)
+                .finish(),
+            DecodeResult::None(block) => write!(f, "DecodeResult::None({})", block.len()),
+        }
+    }
 }
 
 impl<R: Read + Write + Unpin> ImapStream<R> {
