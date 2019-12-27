@@ -29,9 +29,27 @@ pub struct ImapStream<R: Read + Write> {
     /// Buffer for the already read, but not yet parsed data.
     buffer: Block<'static>,
     /// Position of valid read data into buffer.
-    current: (usize, usize),
+    current: Position,
     /// How many bytes do we need to finishe the currrent element that is being decoded.
     decode_needs: usize,
+    /// Whether we should attempt to decode whatever is currently inside the buffer.
+    /// False indicates that we know for certain that the buffer is incomplete.
+    initial_decode: bool,
+}
+
+/// A semantically explicit slice of a buffer.
+#[derive(Eq, PartialEq, Debug, Copy, Clone)]
+struct Position {
+    start: usize,
+    end: usize,
+}
+
+impl Position {
+    const ZERO: Position = Position { start: 0, end: 0 };
+
+    const fn new(start: usize, end: usize) -> Position {
+        Position { start, end }
+    }
 }
 
 enum DecodeResult {
@@ -70,13 +88,14 @@ impl<R: Read + Write + Unpin> ImapStream<R> {
         ImapStream {
             inner,
             buffer: POOL.alloc(INITIAL_CAPACITY),
-            current: (0, 0),
+            current: Position::ZERO,
             decode_needs: 0,
+            initial_decode: false, // buffer is empty initially, nothing to decode
         }
     }
 
     pub async fn encode(&mut self, msg: Request) -> Result<(), io::Error> {
-        log::trace!("> {:?}", msg);
+        log::trace!("encode: input: {:?}", msg);
 
         if let Some(tag) = msg.0 {
             self.inner.write_all(tag.as_bytes()).await?;
@@ -109,7 +128,7 @@ impl<R: Read + Write + Unpin> ImapStream<R> {
         start: usize,
         end: usize,
     ) -> io::Result<DecodeResult> {
-        log::trace!("< {:?}", std::str::from_utf8(&buf[start..end]));
+        log::trace!("decode: input: {:?}", std::str::from_utf8(&buf[start..end]));
 
         let mut rest = None;
         let mut used = 0;
@@ -128,10 +147,14 @@ impl<R: Read + Write + Unpin> ImapStream<R> {
                     Ok(response)
                 }
                 Err(nom::Err::Incomplete(Needed::Size(min))) => {
+                    log::trace!("decode: incomplete data, need minimum {} bytes", min);
                     self.decode_needs = min;
                     Err(None)
                 }
-                Err(nom::Err::Incomplete(_)) => Err(None),
+                Err(nom::Err::Incomplete(_)) => {
+                    log::trace!("decode: incomplete data, need unknown number of bytes");
+                    Err(None)
+                }
                 Err(err) => Err(Some(io::Error::new(
                     io::ErrorKind::Other,
                     format!("{:?} during parsing of {:?}", err, &buf[start..end]),
@@ -157,22 +180,26 @@ impl<R: Read + Write + Unpin> Stream for ImapStream<R> {
     type Item = io::Result<ResponseData>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        // The `poll_next` method must strive to be as idempotent as possible if the underlying
+        // future/stream is not yet ready to produce results. It means that we must be careful
+        // to persist the state of polling between calls to `poll_next`, specifically,
+        // we must always restore the buffer and the current position before any `return`s.
+
         let this = &mut *self;
 
-        let mut n = this.current;
-        this.current = (0, 0);
+        let mut n = std::mem::replace(&mut this.current, Position::ZERO);
         let buffer = std::mem::replace(&mut this.buffer, POOL.alloc(INITIAL_CAPACITY));
 
-        let mut buffer = if (n.1 - n.0) > 0 {
-            match this.decode(buffer, n.0, n.1)? {
+        let mut buffer = if (n.end - n.start) > 0 && this.initial_decode {
+            match this.decode(buffer, n.start, n.end)? {
                 DecodeResult::Some {
                     response,
                     buffer,
                     used,
                 } => {
-                    this.current = (0, used);
+                    // initial_decode is still true
                     std::mem::replace(&mut this.buffer, buffer);
-
+                    this.current = Position::new(0, used);
                     return Poll::Ready(Some(Ok(response)));
                 }
                 DecodeResult::None(buffer) => buffer,
@@ -182,10 +209,12 @@ impl<R: Read + Write + Unpin> Stream for ImapStream<R> {
         };
 
         loop {
-            if (n.1 - n.0) + this.decode_needs >= buffer.capacity() {
+            if (n.end - n.start) + this.decode_needs >= buffer.capacity() {
                 if buffer.capacity() + this.decode_needs < MAX_CAPACITY {
                     buffer.realloc(buffer.capacity() + this.decode_needs);
                 } else {
+                    std::mem::replace(&mut this.buffer, buffer);
+                    this.current = n;
                     return Poll::Ready(Some(Err(io::Error::new(
                         io::ErrorKind::Other,
                         "incoming data too large",
@@ -193,33 +222,50 @@ impl<R: Read + Write + Unpin> Stream for ImapStream<R> {
                 }
             }
 
-            n.1 += futures::ready!(Pin::new(&mut this.inner).poll_read(cx, &mut buffer[n.1..]))?;
+            let bytes_read = match Pin::new(&mut this.inner).poll_read(cx, &mut buffer[n.end..]) {
+                Poll::Ready(result) => result?,
+                Poll::Pending => {
+                    // if we're here, it means that we need more data but there is none yet,
+                    // so no decoding attempts are necessary until we get more data
+                    this.initial_decode = false;
 
-            match this.decode(buffer, n.0, n.1)? {
+                    std::mem::replace(&mut this.buffer, buffer);
+                    this.current = n;
+                    return Poll::Pending;
+                }
+            };
+            n.end += bytes_read;
+
+            match this.decode(buffer, n.start, n.end)? {
                 DecodeResult::Some {
                     response,
                     buffer,
                     used,
                 } => {
-                    this.current = (0, used);
-                    std::mem::replace(&mut this.buffer, buffer);
+                    // current buffer might now contain more data inside, so we need to attempt
+                    // to decode it next time
+                    this.initial_decode = true;
 
+                    std::mem::replace(&mut this.buffer, buffer);
+                    this.current = Position::new(0, used);
                     return Poll::Ready(Some(Ok(response)));
                 }
                 DecodeResult::None(buf) => {
                     buffer = buf;
 
-                    if this.buffer.is_empty() || (n.0 == 0 && n.1 == 0) {
-                        // put back the buffer to reuse it
+                    if this.buffer.is_empty() || n == Position::ZERO {
+                        // "logical buffer" is empty, there is nothing to decode on the next step
+                        this.initial_decode = false;
+
                         std::mem::replace(&mut this.buffer, buffer);
                         this.current = n;
-
                         return Poll::Ready(None);
-                    } else if (n.1 - n.0) == 0 {
-                        // put back the buffer to reuse it
+                    } else if (n.end - n.start) == 0 {
+                        // "logical buffer" is empty, there is nothing to decode on the next step
+                        this.initial_decode = false;
+
                         std::mem::replace(&mut this.buffer, buffer);
                         this.current = n;
-
                         return Poll::Ready(Some(Err(io::Error::new(
                             io::ErrorKind::UnexpectedEof,
                             "bytes remaining in stream",
