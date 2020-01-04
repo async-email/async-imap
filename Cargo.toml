@@ -22,7 +22,7 @@ is-it-maintained-open-issues = { repository = "async-email/async-imap" }
 default = []
 
 [dependencies]
-imap-proto = { git = 'https://github.com/djc/tokio-imap' }
+imap-proto = "0.10"
 nom = "5.0"
 base64 = "0.11"
 chrono = "0.4"
