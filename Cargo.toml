@@ -36,15 +36,12 @@ stop-token = { version = "0.1.1", features = ["unstable"] }
 byte-pool = "0.2.1"
 lazy_static = "1.4.0"
 log = "0.4.8"
+thiserror = "1.0.9"
 
 [dev-dependencies]
-lettre = "0.9"
 lettre_email = "0.9"
-rustls-connector = "0.8.0"
-rustls = { version = "0.16.0", features = ["dangerous_configuration"] }
-webpki = "0.21.0"
 pretty_assertions = "0.6.1"
-native-tls = "0.2.3"
+async-smtp = "0.2.0"
 
 [[example]]
 name = "basic"

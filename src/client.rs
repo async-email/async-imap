@@ -319,7 +319,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Client<T> {
                     let challenge = if let Some(text) = information {
                         ok_or_unauth_client_err!(
                             base64::decode(text).map_err(|e| Error::Parse(
-                                ParseError::Authentication(text.to_string(), Some(e))
+                                ParseError::Authentication((*text).to_string(), Some(e))
                             )),
                             self
                         )

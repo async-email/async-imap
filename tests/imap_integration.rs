@@ -5,28 +5,11 @@ use async_native_tls::TlsConnector;
 use async_std::net::TcpStream;
 use async_std::prelude::*;
 use async_std::task;
-use lettre::Transport;
 
-fn native_tls() -> native_tls::TlsConnector {
-    native_tls::TlsConnector::builder()
+fn native_tls() -> async_native_tls::TlsConnector {
+    async_native_tls::TlsConnector::new()
         .danger_accept_invalid_certs(true)
         .danger_accept_invalid_hostnames(true)
-        .build()
-        .unwrap()
-}
-
-pub struct NoCertificateVerification {}
-
-impl rustls::ServerCertVerifier for NoCertificateVerification {
-    fn verify_server_cert(
-        &self,
-        _roots: &rustls::RootCertStore,
-        _presented_certs: &[rustls::Certificate],
-        _dns_name: webpki::DNSNameRef<'_>,
-        _ocsp: &[u8],
-    ) -> Result<rustls::ServerCertVerified, rustls::TLSError> {
-        Ok(rustls::ServerCertVerified::assertion())
-    }
 }
 
 fn tls() -> TlsConnector {
@@ -54,21 +37,23 @@ async fn session(user: &str) -> Session<async_native_tls::TlsStream<TcpStream>> 
     s
 }
 
-fn smtp(user: &str) -> lettre::SmtpTransport {
-    let creds = lettre::smtp::authentication::Credentials::new(user.to_string(), user.to_string());
-    lettre::SmtpClient::new(
+async fn smtp(user: &str) -> async_smtp::SmtpTransport {
+    let creds =
+        async_smtp::smtp::authentication::Credentials::new(user.to_string(), user.to_string());
+    async_smtp::SmtpClient::with_security(
         &format!(
             "{}:3465",
             std::env::var("TEST_HOST").unwrap_or("127.0.0.1".to_string())
         ),
-        lettre::ClientSecurity::Wrapper(lettre::ClientTlsParameters {
+        async_smtp::ClientSecurity::Wrapper(async_smtp::ClientTlsParameters {
             connector: native_tls(),
-            domain: "smpt.example.com".to_string(),
+            domain: "localhost".to_string(),
         }),
     )
-    .unwrap()
+    .await
+    .expect("Failed to connect to smtp server")
     .credentials(creds)
-    .transport()
+    .into_transport()
 }
 
 // #[test]
@@ -130,6 +115,18 @@ fn inbox_zero() {
         assert_eq!(inbox.len(), 0);
     });
 }
+fn make_email(to: &str) -> async_smtp::SendableEmail {
+    let message_id = "abc";
+    async_smtp::SendableEmail::new(
+        async_smtp::Envelope::new(
+            Some("sender@localhost".parse().unwrap()),
+            vec![to.parse().unwrap()],
+        )
+        .unwrap(),
+        message_id.to_string(),
+        format!("To: <{}>\r\nFrom: <sender@localhost>\r\nMessage-ID: <{}.msg@localhost>\r\nSubject: My first e-mail\r\n\r\nHello world from SMTP", to, message_id),
+    )
+}
 
 #[test]
 #[ignore]
@@ -142,16 +139,11 @@ fn inbox() {
         c.select("INBOX").await.unwrap();
 
         println!("sending");
+        let mut s = smtp(to).await;
+
         // then send the e-mail
-        let mut s = smtp(to);
-        let e = lettre_email::Email::builder()
-            .from("sender@localhost")
-            .to(to)
-            .subject("My first e-mail")
-            .text("Hello world from SMTP")
-            .build()
-            .unwrap();
-        s.send(e.into()).unwrap();
+        let mail = make_email(to);
+        s.connect_and_send(mail).await.unwrap();
 
         println!("searching");
 
@@ -191,7 +183,7 @@ fn inbox() {
         let fetch = &fetch[0];
         assert_eq!(fetch.message, 1);
         assert_ne!(fetch.uid, None);
-        assert_eq!(fetch.size, Some(138));
+        assert_eq!(fetch.size, Some(21));
         let e = fetch.envelope().unwrap();
         assert_eq!(e.subject, Some(&b"My first e-mail"[..]));
         assert_ne!(e.from, None);
@@ -232,15 +224,9 @@ fn inbox_uid() {
         c.select("INBOX").await.unwrap();
 
         // then send the e-mail
-        let mut s = smtp(to);
-        let e = lettre_email::Email::builder()
-            .from("sender@localhost")
-            .to(to)
-            .subject("My first e-mail")
-            .text("Hello world from SMTP")
-            .build()
-            .unwrap();
-        s.send(e.into()).unwrap();
+        let mut s = smtp(to).await;
+        let e = make_email(to);
+        s.connect_and_send(e).await.unwrap();
 
         // now we should see the e-mail!
         let inbox = c.uid_search("ALL").await.unwrap();
