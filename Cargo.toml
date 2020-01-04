@@ -36,6 +36,7 @@ stop-token = { version = "0.1.1", features = ["unstable"] }
 byte-pool = "0.2.1"
 lazy_static = "1.4.0"
 log = "0.4.8"
+thiserror = "1.0.9"
 
 [dev-dependencies]
 lettre_email = "0.9"

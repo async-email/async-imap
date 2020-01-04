@@ -1,159 +1,66 @@
 //! IMAP error types.
 
-use std::error::Error as StdError;
-use std::fmt;
 use std::io::Error as IoError;
 use std::result;
 use std::str::Utf8Error;
 
 use base64::DecodeError;
-use imap_proto::Response;
 
 /// A convenience wrapper around `Result` for `imap::Error`.
 pub type Result<T> = result::Result<T, Error>;
 
 /// A set of errors that can occur in the IMAP client
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum Error {
     /// An `io::Error` that occurred while trying to read or write to a network stream.
-    Io(IoError),
+    #[error("io: {0}")]
+    Io(#[from] IoError),
     /// A BAD response from the IMAP server.
+    #[error("bad response: {0}")]
     Bad(String),
     /// A NO response from the IMAP server.
+    #[error("no response: {0}")]
     No(String),
     /// The connection was terminated unexpectedly.
+    #[error("connection lost")]
     ConnectionLost,
     /// Error parsing a server response.
-    Parse(ParseError),
+    #[error("parse: {0}")]
+    Parse(#[from] ParseError),
     /// Command inputs were not valid [IMAP
     /// strings](https://tools.ietf.org/html/rfc3501#section-4.3).
-    Validate(ValidateError),
-    /// `native_tls` error
-    NativeTlsError(async_native_tls::Error),
+    #[error("validate: {0}")]
+    Validate(#[from] ValidateError),
+    /// `async_native_tls` error
+    #[error("async_native_tls: {0}")]
+    NativeTlsError(#[from] async_native_tls::Error),
     /// Error appending an e-mail.
+    #[error("could not append mail to mailbox")]
     Append,
     #[doc(hidden)]
+    #[error("unknown")]
     __Nonexhaustive,
 }
 
-impl From<IoError> for Error {
-    fn from(err: IoError) -> Error {
-        Error::Io(err)
-    }
-}
-
-impl From<ParseError> for Error {
-    fn from(err: ParseError) -> Error {
-        Error::Parse(err)
-    }
-}
-
-impl<'a> From<&'a Response<'a>> for Error {
-    fn from(err: &'a Response<'a>) -> Error {
-        Error::Parse(ParseError::Unexpected(format!("{:?}", err)))
-    }
-}
-
-impl From<async_native_tls::Error> for Error {
-    fn from(err: async_native_tls::Error) -> Error {
-        Error::NativeTlsError(err)
-    }
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {
-            Error::Io(ref e) => fmt::Display::fmt(e, f),
-            Error::Validate(ref e) => fmt::Display::fmt(e, f),
-            Error::No(ref data) | Error::Bad(ref data) => {
-                write!(f, "{}: {}", &String::from(self.description()), data)
-            }
-            ref e => f.write_str(e.description()),
-        }
-    }
-}
-
-impl StdError for Error {
-    fn description(&self) -> &str {
-        match *self {
-            Error::Io(ref e) => e.description(),
-            Error::Parse(ref e) => e.description(),
-            Error::Validate(ref e) => e.description(),
-            Error::NativeTlsError(ref e) => e.description(),
-            Error::Bad(_) => "Bad Response",
-            Error::No(_) => "No Response",
-            Error::ConnectionLost => "Connection lost",
-            Error::Append => "Could not append mail to mailbox",
-            Error::__Nonexhaustive => "Unknown",
-        }
-    }
-
-    fn cause(&self) -> Option<&dyn StdError> {
-        match *self {
-            Error::Io(ref e) => Some(e),
-            Error::Parse(ParseError::DataNotUtf8(_, ref e)) => Some(e),
-            _ => None,
-        }
-    }
-}
-
 /// An error occured while trying to parse a server response.
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum ParseError {
     /// Indicates an error parsing the status response. Such as OK, NO, and BAD.
+    #[error("unable to parse status response")]
     Invalid(Vec<u8>),
     /// An unexpected response was encountered.
+    #[error("encountered unexpected parsed response: {0}")]
     Unexpected(String),
     /// The client could not find or decode the server's authentication challenge.
+    #[error("unable to parse authentication response: {0} - {1:?}")]
     Authentication(String, Option<DecodeError>),
     /// The client received data that was not UTF-8 encoded.
-    DataNotUtf8(Vec<u8>, Utf8Error),
-}
-
-impl fmt::Display for ParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {
-            ref e => f.write_str(e.description()),
-        }
-    }
-}
-
-impl StdError for ParseError {
-    fn description(&self) -> &str {
-        match *self {
-            ParseError::Invalid(_) => "Unable to parse status response",
-            ParseError::Unexpected(_) => "Encountered unexpected parsed response",
-            ParseError::Authentication(_, _) => "Unable to parse authentication response",
-            ParseError::DataNotUtf8(_, _) => "Unable to parse data as UTF-8 text",
-        }
-    }
-
-    fn cause(&self) -> Option<&dyn StdError> {
-        match *self {
-            ParseError::Authentication(_, Some(ref e)) => Some(e),
-            _ => None,
-        }
-    }
+    #[error("unable to parse data ({0:?}) as UTF-8 text: {1:?}")]
+    DataNotUtf8(Vec<u8>, #[source] Utf8Error),
 }
 
 /// An [invalid character](https://tools.ietf.org/html/rfc3501#section-4.3) was found in an input
 /// string.
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
+#[error("invalid character in input: '{0}'")]
 pub struct ValidateError(pub char);
-
-impl fmt::Display for ValidateError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // print character in debug form because invalid ones are often whitespaces
-        write!(f, "{}: {:?}", self.description(), self.0)
-    }
-}
-
-impl StdError for ValidateError {
-    fn description(&self) -> &str {
-        "Invalid character in input"
-    }
-
-    fn cause(&self) -> Option<&dyn StdError> {
-        None
-    }
-}
