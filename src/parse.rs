@@ -335,7 +335,7 @@ mod tests {
             .collect()
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn parse_capability_test() {
         let expected_capabilities = vec!["IMAP4rev1", "STARTTLS", "AUTH=GSSAPI", "LOGINDISABLED"];
         let responses = input_stream(&vec![
@@ -354,7 +354,7 @@ mod tests {
         }
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn parse_capability_case_insensitive_test() {
         // Test that "IMAP4REV1" (instead of "IMAP4rev1") is accepted
         let expected_capabilities = vec!["IMAP4rev1", "STARTTLS"];
@@ -373,7 +373,7 @@ mod tests {
         }
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     #[should_panic]
     async fn parse_capability_invalid_test() {
         let (send, recv) = sync::channel(10);
@@ -389,7 +389,7 @@ mod tests {
         assert!(recv.is_empty());
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn parse_names_test() {
         let (send, recv) = sync::channel(10);
         let responses = input_stream(&vec!["* LIST (\\HasNoChildren) \".\" \"INBOX\"\r\n"]);
@@ -410,7 +410,7 @@ mod tests {
         assert_eq!(names[0].name(), "INBOX");
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn parse_fetches_empty() {
         let (send, recv) = sync::channel(10);
         let responses = input_stream(&vec![]);
@@ -425,7 +425,7 @@ mod tests {
         assert!(fetches.is_empty());
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn parse_fetches_test() {
         let (send, recv) = sync::channel(10);
         let responses = input_stream(&vec![
@@ -454,7 +454,7 @@ mod tests {
         assert_eq!(fetches[1].header(), None);
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn parse_fetches_w_unilateral() {
         // https://github.com/mattnenterprise/rust-imap/issues/81
         let (send, recv) = sync::channel(10);
@@ -473,7 +473,7 @@ mod tests {
         assert_eq!(fetches[0].uid, Some(74));
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn parse_names_w_unilateral() {
         let (send, recv) = sync::channel(10);
         let responses = input_stream(&vec![
@@ -499,7 +499,7 @@ mod tests {
         assert_eq!(names[0].name(), "INBOX");
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn parse_capabilities_w_unilateral() {
         let (send, recv) = sync::channel(10);
         let responses = input_stream(&vec![
@@ -534,7 +534,7 @@ mod tests {
         assert_eq!(recv.recv().await.unwrap(), UnsolicitedResponse::Exists(4));
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn parse_ids_w_unilateral() {
         let (send, recv) = sync::channel(10);
         let responses = input_stream(&vec![
@@ -564,7 +564,7 @@ mod tests {
         );
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn parse_ids_test() {
         let (send, recv) = sync::channel(10);
         let responses = input_stream(&vec![
@@ -597,7 +597,7 @@ mod tests {
         );
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn parse_ids_search() {
         let (send, recv) = sync::channel(10);
         let responses = input_stream(&vec!["* SEARCH\r\n"]);

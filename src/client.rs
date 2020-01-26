@@ -1414,7 +1414,7 @@ mod tests {
         };
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn fetch_body() {
         let response = "a0 OK Logged in.\r\n\
                         * 2 FETCH (BODY[TEXT] {3}\r\nfoo)\r\n\
@@ -1424,7 +1424,7 @@ mod tests {
         session.read_response().await.unwrap().unwrap();
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn readline_delay_read() {
         let greeting = "* OK Dovecot ready.\r\n";
         let mock_stream = MockStream::default()
@@ -1443,7 +1443,7 @@ mod tests {
         );
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn readline_eof() {
         let mock_stream = MockStream::default().with_eof();
         let mut client = mock_client!(mock_stream);
@@ -1452,7 +1452,7 @@ mod tests {
         assert!(res.is_none());
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     #[should_panic]
     async fn readline_err() {
         // TODO Check the error test
@@ -1461,7 +1461,7 @@ mod tests {
         client.read_response().await.unwrap().unwrap();
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn authenticate() {
         let response = b"+ YmFy\r\n\
                          A0001 OK Logged in\r\n"
@@ -1492,7 +1492,7 @@ mod tests {
         );
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn login() {
         let response = b"A0001 OK Logged in\r\n".to_vec();
         let username = "username";
@@ -1511,7 +1511,7 @@ mod tests {
         }
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn logout() {
         let response = b"A0001 OK Logout completed.\r\n".to_vec();
         let command = format!("A0001 LOGOUT\r\n");
@@ -1524,7 +1524,7 @@ mod tests {
         );
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn rename() {
         let response = b"A0001 OK RENAME completed\r\n".to_vec();
         let current_mailbox_name = "INBOX";
@@ -1546,7 +1546,7 @@ mod tests {
         );
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn subscribe() {
         let response = b"A0001 OK SUBSCRIBE completed\r\n".to_vec();
         let mailbox = "INBOX";
@@ -1560,7 +1560,7 @@ mod tests {
         );
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn unsubscribe() {
         let response = b"A0001 OK UNSUBSCRIBE completed\r\n".to_vec();
         let mailbox = "INBOX";
@@ -1574,7 +1574,7 @@ mod tests {
         );
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn expunge() {
         let response = b"A0001 OK EXPUNGE completed\r\n".to_vec();
         let mock_stream = MockStream::new(response);
@@ -1586,7 +1586,7 @@ mod tests {
         );
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn uid_expunge() {
         let response = b"* 2 EXPUNGE\r\n\
             * 3 EXPUNGE\r\n\
@@ -1607,7 +1607,7 @@ mod tests {
         );
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn check() {
         let response = b"A0001 OK CHECK completed\r\n".to_vec();
         let mock_stream = MockStream::new(response);
@@ -1619,7 +1619,7 @@ mod tests {
         );
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn examine() {
         let response = b"* FLAGS (\\Answered \\Flagged \\Deleted \\Seen \\Draft)\r\n\
             * OK [PERMANENTFLAGS ()] Read-only mailbox.\r\n\
@@ -1657,7 +1657,7 @@ mod tests {
         assert_eq!(mailbox, expected_mailbox);
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn select() {
         let response = b"* FLAGS (\\Answered \\Flagged \\Deleted \\Seen \\Draft)\r\n\
             * OK [PERMANENTFLAGS (\\* \\Answered \\Flagged \\Deleted \\Draft \\Seen)] \
@@ -1703,7 +1703,7 @@ mod tests {
         assert_eq!(mailbox, expected_mailbox);
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn search() {
         let response = b"* SEARCH 1 2 3 4 5\r\n\
             A0001 OK Search completed\r\n"
@@ -1719,7 +1719,7 @@ mod tests {
         assert_eq!(ids, [1, 2, 3, 4, 5].iter().cloned().collect());
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn uid_search() {
         let response = b"* SEARCH 1 2 3 4 5\r\n\
             A0001 OK Search completed\r\n"
@@ -1735,7 +1735,7 @@ mod tests {
         assert_eq!(ids, [1, 2, 3, 4, 5].iter().cloned().collect());
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn uid_search_unordered() {
         let response = b"* SEARCH 1 2 3 4 5\r\n\
             A0002 OK CAPABILITY completed\r\n\
@@ -1752,7 +1752,7 @@ mod tests {
         assert_eq!(ids, [1, 2, 3, 4, 5].iter().cloned().collect());
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn capability() {
         let response = b"* CAPABILITY IMAP4rev1 STARTTLS AUTH=GSSAPI LOGINDISABLED\r\n\
             A0001 OK CAPABILITY completed\r\n"
@@ -1771,7 +1771,7 @@ mod tests {
         }
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn create() {
         let response = b"A0001 OK CREATE completed\r\n".to_vec();
         let mailbox_name = "INBOX";
@@ -1785,7 +1785,7 @@ mod tests {
         );
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn delete() {
         let response = b"A0001 OK DELETE completed\r\n".to_vec();
         let mailbox_name = "INBOX";
@@ -1799,7 +1799,7 @@ mod tests {
         );
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn noop() {
         let response = b"A0001 OK NOOP completed\r\n".to_vec();
         let mock_stream = MockStream::new(response);
@@ -1811,7 +1811,7 @@ mod tests {
         );
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn close() {
         let response = b"A0001 OK CLOSE completed\r\n".to_vec();
         let mock_stream = MockStream::new(response);
@@ -1823,7 +1823,7 @@ mod tests {
         );
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn store() {
         generic_store(" ", |c, set, query| async move {
             c.lock()
@@ -1837,7 +1837,7 @@ mod tests {
         .await;
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn uid_store() {
         generic_store(" UID ", |c, set, query| async move {
             c.lock()
@@ -1864,7 +1864,7 @@ mod tests {
         generic_with_uid(res, "STORE", "2.4", "+FLAGS (\\Deleted)", prefix, op).await;
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn copy() {
         generic_copy(" ", |c, set, query| async move {
             c.lock().await.copy(set, query).await?;
@@ -1873,7 +1873,7 @@ mod tests {
         .await;
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn uid_copy() {
         generic_copy(" UID ", |c, set, query| async move {
             c.lock().await.uid_copy(set, query).await?;
@@ -1898,7 +1898,7 @@ mod tests {
         .await;
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn mv() {
         let response = b"* OK [COPYUID 1511554416 142,399 41:42] Moved UIDs.\r\n\
             * 2 EXPUNGE\r\n\
@@ -1916,7 +1916,7 @@ mod tests {
         );
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn uid_mv() {
         let response = b"* OK [COPYUID 1511554416 142,399 41:42] Moved UIDs.\r\n\
             * 2 EXPUNGE\r\n\
@@ -1934,7 +1934,7 @@ mod tests {
         );
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn fetch() {
         generic_fetch(" ", |c, seq, query| async move {
             c.lock()
@@ -1949,7 +1949,7 @@ mod tests {
         .await;
     }
 
-    #[async_attributes::test]
+    #[async_std::test]
     async fn uid_fetch() {
         generic_fetch(" UID ", |c, seq, query| async move {
             c.lock()

@@ -30,7 +30,6 @@ async-native-tls = "0.3.0"
 async-std = { version = "1.4.0", default-features = false, features = ["std"] }
 pin-utils = "0.1.0-alpha.4"
 futures = "0.3.0"
-async-attributes = "1.1.0"
 rental = "0.5.5"
 stop-token = { version = "0.1.1", features = ["unstable"] }
 byte-pool = "0.2.1"
@@ -42,6 +41,7 @@ thiserror = "1.0.9"
 lettre_email = "0.9"
 pretty_assertions = "0.6.1"
 async-smtp = "0.2.0"
+async-std = { version = "1.4.0", default-features = false, features = ["std", "attributes"] }
 
 [[example]]
 name = "basic"
