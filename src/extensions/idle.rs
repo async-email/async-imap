@@ -38,7 +38,7 @@ pub struct Handle<T: Read + Write + Unpin + fmt::Debug> {
 
 impl<T: Read + Write + Unpin + fmt::Debug> Unpin for Handle<T> {}
 
-impl<T: Read + Write + Unpin + fmt::Debug> Stream for Handle<T> {
+impl<T: Read + Write + Unpin + fmt::Debug + Send> Stream for Handle<T> {
     type Item = io::Result<ResponseData>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -88,7 +88,7 @@ pub enum IdleResponse {
     NewData(ResponseData),
 }
 
-impl<T: Read + Write + Unpin + fmt::Debug> Handle<T> {
+impl<T: Read + Write + Unpin + fmt::Debug + Send> Handle<T> {
     unsafe_pinned!(session: Session<T>);
 
     pub(crate) fn new(session: Session<T>) -> Handle<T> {

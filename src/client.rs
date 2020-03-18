@@ -143,7 +143,7 @@ pub async fn connect<A: ToSocketAddrs, S: AsRef<str>>(
     Ok(client)
 }
 
-impl Client<TcpStream> {
+impl<T: Read + Write + Unpin + fmt::Debug + Send> Client<T> {
     /// This will upgrade an IMAP client from using a regular TCP connection to use TLS.
     ///
     /// The domain parameter is required to perform hostname verification.
@@ -151,7 +151,7 @@ impl Client<TcpStream> {
         mut self,
         domain: S,
         ssl_connector: TlsConnector,
-    ) -> Result<Client<TlsStream<TcpStream>>> {
+    ) -> Result<Client<TlsStream<T>>> {
         self.run_command_and_check_ok("STARTTLS", None).await?;
         let ssl_stream = ssl_connector
             .connect(domain.as_ref(), self.conn.stream.into_inner())
@@ -178,7 +178,7 @@ macro_rules! ok_or_unauth_client_err {
     };
 }
 
-impl<T: Read + Write + Unpin + fmt::Debug> Client<T> {
+impl<T: Read + Write + Unpin + fmt::Debug + Send> Client<T> {
     /// Creates a new client over the given stream.
     ///
     /// For an example of how to use this method to provide a pure-Rust TLS integration, see the
@@ -349,7 +349,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Client<T> {
     }
 }
 
-impl<T: Read + Write + Unpin + fmt::Debug> Session<T> {
+impl<T: Read + Write + Unpin + fmt::Debug + Send> Session<T> {
     unsafe_pinned!(conn: Connection<T>);
 
     pub(crate) fn get_stream(self: Pin<&mut Self>) -> Pin<&mut ImapStream<T>> {
@@ -479,7 +479,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Session<T> {
         &mut self,
         sequence_set: S1,
         query: S2,
-    ) -> Result<impl Stream<Item = Result<Fetch>> + '_>
+    ) -> Result<impl Stream<Item = Result<Fetch>> + '_ + Send>
     where
         S1: AsRef<str>,
         S2: AsRef<str>,
@@ -506,7 +506,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Session<T> {
         &mut self,
         uid_set: S1,
         query: S2,
-    ) -> Result<impl Stream<Item = Result<Fetch>> + '_>
+    ) -> Result<impl Stream<Item = Result<Fetch>> + '_ + Send + Unpin>
     where
         S1: AsRef<str>,
         S2: AsRef<str>,
@@ -676,7 +676,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Session<T> {
     /// The [`EXPUNGE` command](https://tools.ietf.org/html/rfc3501#section-6.4.3) permanently
     /// removes all messages that have [`Flag::Deleted`] set from the currently selected mailbox.
     /// The message sequence number of each message that is removed is returned.
-    pub async fn expunge(&mut self) -> Result<impl Stream<Item = Result<Seq>> + '_> {
+    pub async fn expunge(&mut self) -> Result<impl Stream<Item = Result<Seq>> + '_ + Send> {
         let id = self.run_command("EXPUNGE").await?;
         let res = parse_expunge(
             &mut self.conn.stream,
@@ -711,7 +711,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Session<T> {
     pub async fn uid_expunge<S: AsRef<str>>(
         &mut self,
         uid_set: S,
-    ) -> Result<impl Stream<Item = Result<Uid>> + '_> {
+    ) -> Result<impl Stream<Item = Result<Uid>> + '_ + Send> {
         let id = self
             .run_command(&format!("UID EXPUNGE {}", uid_set.as_ref()))
             .await?;
@@ -808,7 +808,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Session<T> {
         &mut self,
         sequence_set: S1,
         query: S2,
-    ) -> Result<impl Stream<Item = Result<Fetch>> + '_>
+    ) -> Result<impl Stream<Item = Result<Fetch>> + '_ + Send>
     where
         S1: AsRef<str>,
         S2: AsRef<str>,
@@ -834,7 +834,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Session<T> {
         &mut self,
         uid_set: S1,
         query: S2,
-    ) -> Result<impl Stream<Item = Result<Fetch>> + '_>
+    ) -> Result<impl Stream<Item = Result<Fetch>> + '_ + Send>
     where
         S1: AsRef<str>,
         S2: AsRef<str>,
@@ -992,7 +992,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Session<T> {
         &mut self,
         reference_name: Option<&str>,
         mailbox_pattern: Option<&str>,
-    ) -> Result<impl Stream<Item = Result<Name>> + '_> {
+    ) -> Result<impl Stream<Item = Result<Name>> + '_ + Send> {
         let id = self
             .run_command(&format!(
                 "LIST {} {}",
@@ -1027,7 +1027,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Session<T> {
         &mut self,
         reference_name: Option<&str>,
         mailbox_pattern: Option<&str>,
-    ) -> Result<impl Stream<Item = Result<Name>> + '_> {
+    ) -> Result<impl Stream<Item = Result<Name>> + '_ + Send> {
         let id = self
             .run_command(&format!(
                 "LSUB {} {}",
@@ -1448,7 +1448,6 @@ mod tests {
         let mock_stream = MockStream::default().with_eof();
         let mut client = mock_client!(mock_stream);
         let res = client.read_response().await;
-        println!("{:?}", res);
         assert!(res.is_none());
     }
 

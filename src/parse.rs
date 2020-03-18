@@ -10,18 +10,18 @@ use crate::error::{Error, Result};
 use crate::types::ResponseData;
 use crate::types::*;
 
-pub(crate) fn parse_names<'a, T: Stream<Item = io::Result<ResponseData>> + Unpin>(
+pub(crate) fn parse_names<'a, T: Stream<Item = io::Result<ResponseData>> + Unpin + Send>(
     stream: &'a mut T,
     unsolicited: sync::Sender<UnsolicitedResponse>,
     command_tag: RequestId,
-) -> impl Stream<Item = Result<Name>> + 'a {
-    use futures::StreamExt;
+) -> impl Stream<Item = Result<Name>> + 'a + Send + Unpin {
+    use futures::{FutureExt, StreamExt};
 
     StreamExt::filter_map(
         StreamExt::take_while(stream, move |res| filter(res, &command_tag)),
         move |resp| {
             let unsolicited = unsolicited.clone();
-            async move {
+            let res = async move {
                 match resp {
                     Ok(resp) => match resp.parsed() {
                         Response::MailboxData(MailboxDatum::List { .. }) => {
@@ -36,6 +36,9 @@ pub(crate) fn parse_names<'a, T: Stream<Item = io::Result<ResponseData>> + Unpin
                     Err(err) => Some(Err(err.into())),
                 }
             }
+            .boxed();
+
+            res
         },
     )
 }
@@ -55,12 +58,12 @@ fn filter_sync(res: &io::Result<ResponseData>, command_tag: &RequestId) -> bool 
     }
 }
 
-pub(crate) fn parse_fetches<'a, T: Stream<Item = io::Result<ResponseData>> + Unpin>(
+pub(crate) fn parse_fetches<'a, T: Stream<Item = io::Result<ResponseData>> + Unpin + Send>(
     stream: &'a mut T,
     unsolicited: sync::Sender<UnsolicitedResponse>,
     command_tag: RequestId,
-) -> impl Stream<Item = Result<Fetch>> + 'a {
-    use futures::StreamExt;
+) -> impl Stream<Item = Result<Fetch>> + 'a + Send + Unpin {
+    use futures::{FutureExt, StreamExt};
 
     StreamExt::filter_map(
         StreamExt::take_while(stream, move |res| filter(res, &command_tag)),
@@ -79,15 +82,16 @@ pub(crate) fn parse_fetches<'a, T: Stream<Item = io::Result<ResponseData>> + Unp
                     Err(err) => Some(Err(err.into())),
                 }
             }
+            .boxed()
         },
     )
 }
 
-pub(crate) fn parse_expunge<'a, T: Stream<Item = io::Result<ResponseData>> + Unpin>(
+pub(crate) fn parse_expunge<'a, T: Stream<Item = io::Result<ResponseData>> + Unpin + Send>(
     stream: &'a mut T,
     unsolicited: sync::Sender<UnsolicitedResponse>,
     command_tag: RequestId,
-) -> impl Stream<Item = Result<u32>> + 'a {
+) -> impl Stream<Item = Result<u32>> + 'a + Send {
     use futures::StreamExt;
 
     StreamExt::filter_map(
