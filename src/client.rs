@@ -198,6 +198,12 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Client<T> {
         }
     }
 
+    /// Convert this Client into the raw underlying stream.
+    pub fn into_inner(self) -> T {
+        let Self { conn, .. } = self;
+        conn.into_inner()
+    }
+
     /// Log in to the IMAP server. Upon success a [`Session`](struct.Session.html) instance is
     /// returned; on error the original `Client` instance is returned in addition to the error.
     /// This is because `login` takes ownership of `self`, so in order to try again (e.g. after
@@ -1281,6 +1287,12 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Session<T> {
 impl<T: Read + Write + Unpin + fmt::Debug> Connection<T> {
     unsafe_pinned!(stream: ImapStream<T>);
 
+    /// Convert this connection into the raw underlying stream.
+    pub fn into_inner(self) -> T {
+        let Self { stream, .. } = self;
+        stream.into_inner()
+    }
+
     /// Read the next response on the connection.
     pub async fn read_response(&mut self) -> Option<io::Result<ResponseData>> {
         self.stream.next().await
@@ -1304,7 +1316,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Connection<T> {
     }
 
     /// Execute a command and check that the next response is a matching done.
-    pub(crate) async fn run_command_and_check_ok(
+    pub async fn run_command_and_check_ok(
         &mut self,
         command: &str,
         unsolicited: Option<sync::Sender<UnsolicitedResponse>>,
