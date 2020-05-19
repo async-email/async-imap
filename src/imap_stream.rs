@@ -198,7 +198,7 @@ impl<R: Read + Write + Unpin> Stream for ImapStream<R> {
                     used,
                 } => {
                     // initial_decode is still true
-                    std::mem::replace(&mut this.buffer, buffer);
+                    let _ = std::mem::replace(&mut this.buffer, buffer);
                     this.current = Position::new(0, used);
                     return Poll::Ready(Some(Ok(response)));
                 }
@@ -213,7 +213,7 @@ impl<R: Read + Write + Unpin> Stream for ImapStream<R> {
                 if buffer.capacity() + this.decode_needs < MAX_CAPACITY {
                     buffer.realloc(buffer.capacity() + this.decode_needs);
                 } else {
-                    std::mem::replace(&mut this.buffer, buffer);
+                    let _ = std::mem::replace(&mut this.buffer, buffer);
                     this.current = n;
                     return Poll::Ready(Some(Err(io::Error::new(
                         io::ErrorKind::Other,
@@ -229,7 +229,7 @@ impl<R: Read + Write + Unpin> Stream for ImapStream<R> {
                     // so no decoding attempts are necessary until we get more data
                     this.initial_decode = false;
 
-                    std::mem::replace(&mut this.buffer, buffer);
+                    let _ = std::mem::replace(&mut this.buffer, buffer);
                     this.current = n;
                     return Poll::Pending;
                 }
@@ -246,7 +246,7 @@ impl<R: Read + Write + Unpin> Stream for ImapStream<R> {
                     // to decode it next time
                     this.initial_decode = true;
 
-                    std::mem::replace(&mut this.buffer, buffer);
+                    let _ = std::mem::replace(&mut this.buffer, buffer);
                     this.current = Position::new(0, used);
                     return Poll::Ready(Some(Ok(response)));
                 }
@@ -257,14 +257,14 @@ impl<R: Read + Write + Unpin> Stream for ImapStream<R> {
                         // "logical buffer" is empty, there is nothing to decode on the next step
                         this.initial_decode = false;
 
-                        std::mem::replace(&mut this.buffer, buffer);
+                        let _ = std::mem::replace(&mut this.buffer, buffer);
                         this.current = n;
                         return Poll::Ready(None);
                     } else if (n.end - n.start) == 0 {
                         // "logical buffer" is empty, there is nothing to decode on the next step
                         this.initial_decode = false;
 
-                        std::mem::replace(&mut this.buffer, buffer);
+                        let _ = std::mem::replace(&mut this.buffer, buffer);
                         this.current = n;
                         return Poll::Ready(Some(Err(io::Error::new(
                             io::ErrorKind::UnexpectedEof,
