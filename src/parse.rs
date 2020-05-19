@@ -21,7 +21,7 @@ pub(crate) fn parse_names<'a, T: Stream<Item = io::Result<ResponseData>> + Unpin
         StreamExt::take_while(stream, move |res| filter(res, &command_tag)),
         move |resp| {
             let unsolicited = unsolicited.clone();
-            let res = async move {
+            async move {
                 match resp {
                     Ok(resp) => match resp.parsed() {
                         Response::MailboxData(MailboxDatum::List { .. }) => {
@@ -36,9 +36,7 @@ pub(crate) fn parse_names<'a, T: Stream<Item = io::Result<ResponseData>> + Unpin
                     Err(err) => Some(Err(err.into())),
                 }
             }
-            .boxed();
-
-            res
+            .boxed()
         },
     )
 }
