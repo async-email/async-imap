@@ -64,3 +64,15 @@ pub enum ParseError {
 #[derive(thiserror::Error, Debug)]
 #[error("invalid character in input: '{0}'")]
 pub struct ValidateError(pub char);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn is_send<T: Send>(_t: T) {}
+
+    #[test]
+    fn test_send() {
+        is_send::<Result<usize>>(Ok(3));
+    }
+}
