@@ -26,12 +26,12 @@ imap-proto = "0.10"
 nom = "5.0"
 base64 = "0.11"
 chrono = "0.4"
-async-native-tls = "0.3.0"
-async-std = { version = "1.4.0", default-features = false, features = ["std"] }
+async-native-tls = { git = "https://github.com/async-email/async-native-tls", version = "0.3.0" }
+async-std = { version = "1.6.0-beta.2", default-features = false, features = ["std"] }
 pin-utils = "0.1.0-alpha.4"
 futures = "0.3.0"
 rental = "0.5.5"
-stop-token = { version = "0.1.1", features = ["unstable"] }
+stop-token = { git = "https://github.com/dignifiedquire/stop-token", version = "0.1.1", features = ["unstable"] }
 byte-pool = "0.2.1"
 lazy_static = "1.4.0"
 log = "0.4.8"
@@ -41,7 +41,7 @@ thiserror = "1.0.9"
 lettre_email = "0.9"
 pretty_assertions = "0.6.1"
 async-smtp = "0.2.0"
-async-std = { version = "1.4.0", default-features = false, features = ["std", "attributes"] }
+async-std = { version = "1.6.0-beta.2", default-features = false, features = ["std", "attributes"] }
 
 [[example]]
 name = "basic"
