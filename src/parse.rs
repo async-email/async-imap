@@ -468,7 +468,7 @@ mod tests {
             .collect::<Result<Vec<_>>>()
             .await
             .unwrap();
-        assert_eq!(recv.recv().await, Some(UnsolicitedResponse::Recent(1)));
+        assert_eq!(recv.recv().await.unwrap(), UnsolicitedResponse::Recent(1));
 
         assert_eq!(fetches.len(), 1);
         assert_eq!(fetches[0].message, 37);
@@ -490,7 +490,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(recv.recv().await, Some(UnsolicitedResponse::Expunge(4)));
+        assert_eq!(recv.recv().await.unwrap(), UnsolicitedResponse::Expunge(4));
 
         assert_eq!(names.len(), 1);
         assert_eq!(
