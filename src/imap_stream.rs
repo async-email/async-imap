@@ -95,7 +95,11 @@ impl<R: Read + Write + Unpin> ImapStream<R> {
     }
 
     pub async fn encode(&mut self, msg: Request) -> Result<(), io::Error> {
-        log::trace!("encode: input: {:?}", msg);
+        log::trace!(
+            "encode: input: {:?}, {:?}",
+            msg.0,
+            std::str::from_utf8(&msg.1)
+        );
 
         if let Some(tag) = msg.0 {
             self.inner.write_all(tag.as_bytes()).await?;

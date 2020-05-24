@@ -283,6 +283,11 @@ pub(crate) async fn handle_unilateral(
     res: ResponseData,
     unsolicited: sync::Sender<UnsolicitedResponse>,
 ) {
+    // ignore these if they are not being consumed
+    if unsolicited.is_full() {
+        return;
+    }
+
     match res.parsed() {
         Response::MailboxData(MailboxDatum::Status { mailbox, status }) => {
             unsolicited
