@@ -24,7 +24,7 @@ default = []
 [dependencies]
 imap-proto = "0.10"
 nom = "5.0"
-base64 = "0.11"
+base64 = "0.12"
 chrono = "0.4"
 async-native-tls = { version = "0.3.3" }
 async-std = { version = "1.6.0", default-features = false, features = ["std"] }
