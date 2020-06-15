@@ -133,7 +133,7 @@ impl<R: Read + Write + Unpin> ImapStream<R> {
         let mut rest = None;
         let mut used = 0;
         let res = ResponseData::try_new(buf, |buf| {
-            match imap_proto::parse_response(&buf[start..end]) {
+            match imap_proto::Response::from_bytes(&buf[start..end]) {
                 Ok((remaining, response)) => {
                     // TODO: figure out if we can shrink to the minimum required size.
                     self.decode_needs = 0;

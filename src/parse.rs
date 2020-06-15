@@ -326,7 +326,7 @@ mod tests {
                 let mut block = crate::imap_stream::POOL.alloc(line.as_bytes().len());
                 block.copy_from_slice(line.as_bytes());
                 ResponseData::try_new(block, |bytes| -> io::Result<_> {
-                    let (remaining, response) = imap_proto::parse_response(bytes).unwrap();
+                    let (remaining, response) = imap_proto::Response::from_bytes(bytes).unwrap();
                     assert_eq!(remaining.len(), 0);
                     Ok(response)
                 })
