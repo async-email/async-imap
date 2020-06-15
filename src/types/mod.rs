@@ -273,4 +273,13 @@ pub enum UnsolicitedResponse {
     Expunge(u32),
     /// Any other kind of unsolicted response.
     Other(ResponseData),
+
+    /// An unsolicited METADATA response (https://tools.ietf.org/html/rfc5464#section-4.4.2)
+    /// that reports a change in a server or mailbox annotation.
+    Metadata {
+        /// Mailbox name for which annotations were changed.
+        mailbox: String,
+        /// List of annotations that were changed.
+        metadata_entries: Vec<String>,
+    },
 }

@@ -46,7 +46,7 @@ fn filter(res: &io::Result<ResponseData>, command_tag: &RequestId) -> impl Futur
     futures::future::ready(val)
 }
 
-fn filter_sync(res: &io::Result<ResponseData>, command_tag: &RequestId) -> bool {
+pub(crate) fn filter_sync(res: &io::Result<ResponseData>, command_tag: &RequestId) -> bool {
     match res {
         Ok(res) => match res.parsed() {
             Response::Done { tag, .. } => tag != command_tag,
@@ -333,7 +333,7 @@ mod tests {
                 let mut block = crate::imap_stream::POOL.alloc(line.as_bytes().len());
                 block.copy_from_slice(line.as_bytes());
                 ResponseData::try_new(block, |bytes| -> io::Result<_> {
-                    let (remaining, response) = imap_proto::parse_response(bytes).unwrap();
+                    let (remaining, response) = imap_proto::Response::from_bytes(bytes).unwrap();
                     assert_eq!(remaining.len(), 0);
                     Ok(response)
                 })
