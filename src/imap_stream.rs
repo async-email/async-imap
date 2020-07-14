@@ -214,8 +214,13 @@ impl<R: Read + Write + Unpin> Stream for ImapStream<R> {
 
         loop {
             if (n.end - n.start) + this.decode_needs >= buffer.capacity() {
-                if buffer.capacity() + this.decode_needs < MAX_CAPACITY {
-                    buffer.realloc(buffer.capacity() + this.decode_needs);
+                let needed_capacity = buffer.capacity() + this.decode_needs;
+                if needed_capacity < MAX_CAPACITY {
+                    let aligned = match needed_capacity % INITIAL_CAPACITY {
+                        0 => needed_capacity,
+                        x => needed_capacity + (INITIAL_CAPACITY - x),
+                    };
+                    buffer.realloc(aligned);
                 } else {
                     let _ = std::mem::replace(&mut this.buffer, buffer);
                     this.current = n;
