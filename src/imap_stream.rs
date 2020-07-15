@@ -125,6 +125,17 @@ impl<R: Read + Write + Unpin> ImapStream<R> {
     }
 }
 
+/// Return the number of bytes rounded up to a multiple of INITIAL_CAPACITY.
+///
+/// This is useful to limit the number of differently-sized blocks allocated in the
+/// byte-pool and thus encourage more block-reuse.
+fn aligned_size(min_size: usize) -> usize {
+    match min_size % INITIAL_CAPACITY {
+        0 => min_size,
+        x => min_size + (INITIAL_CAPACITY - x),
+    }
+}
+
 impl<R: Read + Write + Unpin> ImapStream<R> {
     fn decode(
         &mut self,
@@ -142,7 +153,8 @@ impl<R: Read + Write + Unpin> ImapStream<R> {
                     // TODO: figure out if we can shrink to the minimum required size.
                     self.decode_needs = 0;
 
-                    let mut buf = POOL.alloc(std::cmp::max(remaining.len(), INITIAL_CAPACITY));
+                    let buf_size = std::cmp::max(remaining.len(), INITIAL_CAPACITY);
+                    let mut buf = POOL.alloc(aligned_size(buf_size));
                     buf[..remaining.len()].copy_from_slice(remaining);
                     used = remaining.len();
 
@@ -216,11 +228,7 @@ impl<R: Read + Write + Unpin> Stream for ImapStream<R> {
             if (n.end - n.start) + this.decode_needs >= buffer.capacity() {
                 let needed_capacity = buffer.capacity() + this.decode_needs;
                 if needed_capacity < MAX_CAPACITY {
-                    let aligned = match needed_capacity % INITIAL_CAPACITY {
-                        0 => needed_capacity,
-                        x => needed_capacity + (INITIAL_CAPACITY - x),
-                    };
-                    buffer.realloc(aligned);
+                    buffer.realloc(aligned_size(needed_capacity));
                 } else {
                     let _ = std::mem::replace(&mut this.buffer, buffer);
                     this.current = n;
