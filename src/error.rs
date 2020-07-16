@@ -11,6 +11,7 @@ pub type Result<T> = result::Result<T, Error>;
 
 /// A set of errors that can occur in the IMAP client
 #[derive(thiserror::Error, Debug)]
+#[non_exhaustive]
 pub enum Error {
     /// An `io::Error` that occurred while trying to read or write to a network stream.
     #[error("io: {0}")]
@@ -37,9 +38,6 @@ pub enum Error {
     /// Error appending an e-mail.
     #[error("could not append mail to mailbox")]
     Append,
-    #[doc(hidden)]
-    #[error("unknown")]
-    __Nonexhaustive,
 }
 
 /// An error occured while trying to parse a server response.
