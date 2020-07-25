@@ -1,4 +1,3 @@
-use std::fmt;
 use std::pin::Pin;
 
 use async_std::io::{self, Read, Write};
@@ -10,9 +9,6 @@ use futures::task::{Context, Poll};
 use nom::Needed;
 
 use crate::types::{Request, ResponseData};
-
-const INITIAL_CAPACITY: usize = 1024 * 4;
-const MAX_CAPACITY: usize = 512 * 1024 * 1024; // 512 MiB
 
 lazy_static::lazy_static! {
     /// The global buffer pool we use for storing incoming data.
@@ -26,60 +22,13 @@ pub struct ImapStream<R: Read + Write> {
     // TODO: write some buffering logic
     /// The underlying stream
     pub(crate) inner: R,
-    /// Buffer for the already read, but not yet parsed data.
-    buffer: Block<'static>,
-    /// Position of valid read data into buffer.
-    current: Position,
-    /// How many bytes do we need to finishe the currrent element that is being decoded.
-    decode_needs: usize,
-    /// Whether we should attempt to decode whatever is currently inside the buffer.
-    /// False indicates that we know for certain that the buffer is incomplete.
-    initial_decode: bool,
-}
-
-/// A semantically explicit slice of a buffer.
-#[derive(Eq, PartialEq, Debug, Copy, Clone)]
-struct Position {
-    start: usize,
-    end: usize,
-}
-
-impl Position {
-    const ZERO: Position = Position { start: 0, end: 0 };
-
-    const fn new(start: usize, end: usize) -> Position {
-        Position { start, end }
-    }
-}
-
-enum DecodeResult {
-    Some {
-        /// The parsed response.
-        response: ResponseData,
-        /// Remaining data.
-        buffer: Block<'static>,
-        /// How many bytes are actually valid data in `buffer`.
-        used: usize,
-    },
-    None(Block<'static>),
-}
-
-impl fmt::Debug for DecodeResult {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            DecodeResult::Some {
-                response,
-                buffer,
-                used,
-            } => f
-                .debug_struct("DecodeResult::Some")
-                .field("response", response)
-                .field("block", &buffer.len())
-                .field("used", used)
-                .finish(),
-            DecodeResult::None(block) => write!(f, "DecodeResult::None({})", block.len()),
-        }
-    }
+    /// Number of bytes the next decode operation needs if known.
+    decode_needs: Option<usize>,
+    /// The buffer.
+    buffer: Buffer,
+    /// Whether there is any more items to return from the stream.  This is set to true once
+    /// all decodable data in the buffer is returned and the underlying stream is closed.
+    closed: bool,
 }
 
 impl<R: Read + Write + Unpin> ImapStream<R> {
@@ -87,10 +36,9 @@ impl<R: Read + Write + Unpin> ImapStream<R> {
     pub fn new(inner: R) -> Self {
         ImapStream {
             inner,
-            buffer: POOL.alloc(INITIAL_CAPACITY),
-            current: Position::ZERO,
-            decode_needs: 0,
-            initial_decode: false, // buffer is empty initially, nothing to decode
+            buffer: Buffer::new(),
+            decode_needs: None,
+            closed: false,
         }
     }
 
@@ -123,72 +71,192 @@ impl<R: Read + Write + Unpin> ImapStream<R> {
     pub fn as_mut(&mut self) -> &mut R {
         &mut self.inner
     }
-}
 
-/// Return the number of bytes rounded up to a multiple of INITIAL_CAPACITY.
-///
-/// This is useful to limit the number of differently-sized blocks allocated in the
-/// byte-pool and thus encourage more block-reuse.
-fn aligned_size(min_size: usize) -> usize {
-    match min_size % INITIAL_CAPACITY {
-        0 => min_size,
-        x => min_size + (INITIAL_CAPACITY - x),
+    /// End-Of-File return value.
+    ///
+    /// Return the appropriate EOF value for the stream depending on whether there is still
+    /// data in the buffer.  It is assumed that any remaining data in the buffer can not be
+    /// decoded.
+    fn stream_eof_value(&self) -> Option<io::Result<ResponseData>> {
+        match self.buffer.used() {
+            0 => None,
+            _ => Some(Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "bytes remaining in stream",
+            ))),
+        }
     }
 }
 
 impl<R: Read + Write + Unpin> ImapStream<R> {
-    fn decode(
-        &mut self,
-        buf: Block<'static>,
-        start: usize,
-        end: usize,
-    ) -> io::Result<DecodeResult> {
-        log::trace!("decode: input: {:?}", std::str::from_utf8(&buf[start..end]));
+    fn maybe_decode(&mut self) -> io::Result<Option<ResponseData>> {
+        if self.buffer.used() > self.decode_needs.unwrap_or(0) {
+            self.decode()
+        } else {
+            Ok(None)
+        }
+    }
 
-        let mut rest = None;
-        let mut used = 0;
-        let res = ResponseData::try_new(buf, |buf| {
-            match imap_proto::parse_response(&buf[start..end]) {
+    fn decode(&mut self) -> io::Result<Option<ResponseData>> {
+        let block: Block<'static> = self.buffer.take_block();
+        // Be aware, now self.buffer is invalid until block is returned or reset!
+
+        let res = ResponseData::try_new(block, |buf| {
+            let buf = &buf[..self.buffer.used()];
+            log::trace!("decode: input: {:?}", std::str::from_utf8(buf));
+            match imap_proto::parse_response(buf) {
                 Ok((remaining, response)) => {
-                    // TODO: figure out if we can shrink to the minimum required size.
-                    self.decode_needs = 0;
-
-                    let buf_size = std::cmp::max(remaining.len(), INITIAL_CAPACITY);
-                    let mut buf = POOL.alloc(aligned_size(buf_size));
-                    buf[..remaining.len()].copy_from_slice(remaining);
-                    used = remaining.len();
-
-                    rest = Some(buf);
-
+                    // TODO: figure out if we can use a minimum required size for a response.
+                    self.decode_needs = None;
+                    self.buffer.reset_with_data(remaining);
                     Ok(response)
                 }
                 Err(nom::Err::Incomplete(Needed::Size(min))) => {
                     log::trace!("decode: incomplete data, need minimum {} bytes", min);
-                    self.decode_needs = min;
+                    self.decode_needs = Some(min);
                     Err(None)
                 }
                 Err(nom::Err::Incomplete(_)) => {
                     log::trace!("decode: incomplete data, need unknown number of bytes");
+                    self.decode_needs = None;
                     Err(None)
                 }
-                Err(err) => Err(Some(io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("{:?} during parsing of {:?}", err, &buf[start..end]),
-                ))),
+                Err(other) => {
+                    self.decode_needs = None;
+                    Err(Some(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("{:?} during parsing of {:?}", other, buf),
+                    )))
+                }
             }
         });
-
         match res {
-            Ok(response) => Ok(DecodeResult::Some {
-                response,
-                buffer: rest.unwrap(),
-                used,
-            }),
-            Err(rental::RentalError(err, buf)) => match err {
-                Some(err) => Err(err),
-                None => Ok(DecodeResult::None(buf)),
-            },
+            Ok(response) => Ok(Some(response)),
+            Err(rental::RentalError(err, block)) => {
+                self.buffer.return_block(block);
+                match err {
+                    Some(err) => Err(err),
+                    None => Ok(None),
+                }
+            }
         }
+    }
+}
+
+/// Abstraction around needed buffer management.
+#[derive(Debug)]
+struct Buffer {
+    /// The buffer itself.
+    block: Block<'static>,
+    /// Offset where used bytes range ends.
+    offset: usize,
+}
+
+impl Buffer {
+    const BLOCK_SIZE: usize = 1024 * 4;
+    const MAX_CAPACITY: usize = 512 * 1024 * 1024; // 512 MiB
+
+    fn new() -> Self {
+        Self {
+            block: POOL.alloc(Self::BLOCK_SIZE),
+            offset: 0,
+        }
+    }
+
+    /// Returns the number of bytes in the buffer containing data.
+    fn used(&self) -> usize {
+        self.offset
+    }
+
+    /// Returns the unused part of the buffer to which new data can be written.
+    fn free_as_mut_slice(&mut self) -> &mut [u8] {
+        &mut self.block[self.offset..]
+    }
+
+    /// Indicate how many new bytes were written into the buffer.
+    ///
+    /// When new bytes are written into the slice returned by [tail_as_slice] this method
+    /// should be called to extend the used portion of the buffer to include the new data.
+    ///
+    /// You can not write past the end of the buffer, so extending more then there is free
+    /// space marks the entire buffer as used.
+    // aka advance()?
+    fn extend_used(&mut self, num_bytes: usize) {
+        self.offset += num_bytes;
+        if self.offset > self.block.size() {
+            self.offset = self.block.size();
+        }
+    }
+
+    /// Ensure the buffer has free capacity, optionally ensuring minimum buffer size.
+    fn ensure_capacity(&mut self, required: Option<usize>) -> io::Result<()> {
+        let free_bytes: usize = self.block.size() - self.offset;
+        let min_required_bytes: usize = required.unwrap_or(0);
+        let extra_bytes_needed: usize = min_required_bytes.saturating_sub(self.block.size());
+        if free_bytes == 0 || extra_bytes_needed > 0 {
+            let increase = std::cmp::max(Buffer::BLOCK_SIZE, extra_bytes_needed);
+            self.grow(increase)?;
+        }
+        Ok(())
+    }
+
+    /// Grows the buffer, ensuring there are free bytes in the tail.
+    ///
+    /// The specified number of bytes is only a minimum.  The buffer could grow by more as
+    /// it will always grow in multiples of [BLOCK_SIZE].
+    ///
+    /// If the size would be larger than [MAX_CAPACITY] an error is returned.
+    // TODO: This bypasses the byte-pool block re-use.  That's bad.
+    fn grow(&mut self, num_bytes: usize) -> io::Result<()> {
+        let min_size = self.block.size() + num_bytes;
+        let new_size = match min_size % Self::BLOCK_SIZE {
+            0 => min_size,
+            n => min_size + (Self::BLOCK_SIZE - n),
+        };
+        if new_size > Self::MAX_CAPACITY {
+            Err(io::Error::new(
+                io::ErrorKind::Other,
+                "incoming data too large",
+            ))
+        } else {
+            self.block.realloc(new_size);
+            Ok(())
+        }
+    }
+
+    /// Return the block backing the buffer.
+    ///
+    /// Next you *must* either return this block using [return_block] or call
+    /// [reset_with_data].
+    // TODO: Enforce this with typestate.
+    fn take_block(&mut self) -> Block<'static> {
+        std::mem::replace(&mut self.block, POOL.alloc(Self::BLOCK_SIZE))
+    }
+
+    /// Reset the buffer to be a new allocation with given data copied in.
+    ///
+    /// This allows the previously returned block from [get_block] to be used in and owned
+    /// by the [ResponseData].
+    ///
+    /// This does not do any bounds checking to see if the new buffer would exceed the
+    /// maximum size.  It will however ensure that there is at least some free space at the
+    /// end of the buffer so that the next reading operation won't need to realloc right
+    /// away.  This could be wasteful if the next action on the buffer is another decode
+    /// rather than a read, but we don't know.
+    fn reset_with_data(&mut self, data: &[u8]) {
+        let min_size = data.len();
+        let new_size = match min_size % Self::BLOCK_SIZE {
+            0 => min_size + Self::BLOCK_SIZE,
+            n => min_size + (Self::BLOCK_SIZE - n),
+        };
+        self.block = POOL.alloc(new_size);
+        self.block[..data.len()].copy_from_slice(data);
+        self.offset = data.len();
+    }
+
+    /// Return the block which backs this buffer.
+    fn return_block(&mut self, block: Block<'static>) {
+        self.block = block;
     }
 }
 
@@ -196,100 +264,157 @@ impl<R: Read + Write + Unpin> Stream for ImapStream<R> {
     type Item = io::Result<ResponseData>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        // The `poll_next` method must strive to be as idempotent as possible if the underlying
-        // future/stream is not yet ready to produce results. It means that we must be careful
-        // to persist the state of polling between calls to `poll_next`, specifically,
-        // we must always restore the buffer and the current position before any `return`s.
-
         let this = &mut *self;
-
-        let mut n = std::mem::replace(&mut this.current, Position::ZERO);
-        let buffer = std::mem::replace(&mut this.buffer, POOL.alloc(INITIAL_CAPACITY));
-
-        let mut buffer = if (n.end - n.start) > 0 && this.initial_decode {
-            match this.decode(buffer, n.start, n.end)? {
-                DecodeResult::Some {
-                    response,
-                    buffer,
-                    used,
-                } => {
-                    // initial_decode is still true
-                    let _ = std::mem::replace(&mut this.buffer, buffer);
-                    this.current = Position::new(0, used);
-                    return Poll::Ready(Some(Ok(response)));
-                }
-                DecodeResult::None(buffer) => buffer,
-            }
-        } else {
-            buffer
-        };
-
+        if let Some(response) = this.maybe_decode()? {
+            return Poll::Ready(Some(Ok(response)));
+        }
+        if this.closed {
+            return Poll::Ready(this.stream_eof_value());
+        }
         loop {
-            if (n.end - n.start) + this.decode_needs >= buffer.capacity() {
-                let needed_capacity = buffer.capacity() + this.decode_needs;
-                if needed_capacity < MAX_CAPACITY {
-                    buffer.realloc(aligned_size(needed_capacity));
-                } else {
-                    let _ = std::mem::replace(&mut this.buffer, buffer);
-                    this.current = n;
-                    return Poll::Ready(Some(Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        "incoming data too large",
-                    ))));
-                }
-            }
-
-            let bytes_read = match Pin::new(&mut this.inner).poll_read(cx, &mut buffer[n.end..]) {
-                Poll::Ready(result) => result?,
-                Poll::Pending => {
-                    // if we're here, it means that we need more data but there is none yet,
-                    // so no decoding attempts are necessary until we get more data
-                    this.initial_decode = false;
-
-                    let _ = std::mem::replace(&mut this.buffer, buffer);
-                    this.current = n;
-                    return Poll::Pending;
-                }
-            };
-            n.end += bytes_read;
-
-            match this.decode(buffer, n.start, n.end)? {
-                DecodeResult::Some {
-                    response,
-                    buffer,
-                    used,
-                } => {
-                    // current buffer might now contain more data inside, so we need to attempt
-                    // to decode it next time
-                    this.initial_decode = true;
-
-                    let _ = std::mem::replace(&mut this.buffer, buffer);
-                    this.current = Position::new(0, used);
-                    return Poll::Ready(Some(Ok(response)));
-                }
-                DecodeResult::None(buf) => {
-                    buffer = buf;
-
-                    if this.buffer.is_empty() || n == Position::ZERO {
-                        // "logical buffer" is empty, there is nothing to decode on the next step
-                        this.initial_decode = false;
-
-                        let _ = std::mem::replace(&mut this.buffer, buffer);
-                        this.current = n;
-                        return Poll::Ready(None);
-                    } else if (n.end - n.start) == 0 {
-                        // "logical buffer" is empty, there is nothing to decode on the next step
-                        this.initial_decode = false;
-
-                        let _ = std::mem::replace(&mut this.buffer, buffer);
-                        this.current = n;
-                        return Poll::Ready(Some(Err(io::Error::new(
-                            io::ErrorKind::UnexpectedEof,
-                            "bytes remaining in stream",
-                        ))));
+            this.buffer.ensure_capacity(this.decode_needs)?;
+            let num_bytes_read =
+                match Pin::new(&mut this.inner).poll_read(cx, this.buffer.free_as_mut_slice()) {
+                    Poll::Ready(result) => result?,
+                    Poll::Pending => {
+                        return Poll::Pending;
                     }
-                }
+                };
+            if num_bytes_read == 0 {
+                this.closed = true;
+                return Poll::Ready(this.stream_eof_value());
+            }
+            this.buffer.extend_used(num_bytes_read);
+            if let Some(response) = this.maybe_decode()? {
+                return Poll::Ready(Some(Ok(response)));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::io::Write;
+
+    #[test]
+    fn test_buffer_empty() {
+        let buf = Buffer::new();
+        assert_eq!(buf.used(), 0);
+
+        let mut buf = Buffer::new();
+        let slice: &[u8] = buf.free_as_mut_slice();
+        assert_eq!(slice.len(), Buffer::BLOCK_SIZE);
+        assert_eq!(slice.len(), buf.block.size());
+    }
+
+    #[test]
+    fn test_buffer_extend_use() {
+        let mut buf = Buffer::new();
+        buf.extend_used(3);
+        assert_eq!(buf.used(), 3);
+        let slice = buf.free_as_mut_slice();
+        assert_eq!(slice.len(), Buffer::BLOCK_SIZE - 3);
+
+        // Extend past the end of the buffer.
+        buf.extend_used(Buffer::BLOCK_SIZE);
+        assert_eq!(buf.used(), Buffer::BLOCK_SIZE);
+        assert_eq!(buf.offset, Buffer::BLOCK_SIZE);
+        assert_eq!(buf.block.len(), buf.offset);
+        let slice = buf.free_as_mut_slice();
+        assert_eq!(slice.len(), 0);
+    }
+
+    #[test]
+    fn test_buffer_write_read() {
+        let mut buf = Buffer::new();
+        let mut slice = buf.free_as_mut_slice();
+        slice.write(b"hello").unwrap();
+        std::mem::drop(slice);
+        buf.extend_used(b"hello".len());
+
+        let slice = &buf.block[..buf.used()];
+        assert_eq!(slice, b"hello");
+        assert_eq!(buf.free_as_mut_slice().len(), buf.block.size() - buf.offset);
+    }
+
+    #[test]
+    fn test_buffer_grow() {
+        let mut buf = Buffer::new();
+        assert_eq!(buf.block.size(), Buffer::BLOCK_SIZE);
+        buf.grow(1).unwrap();
+        assert_eq!(buf.block.size(), 2 * Buffer::BLOCK_SIZE);
+
+        buf.grow(Buffer::BLOCK_SIZE + 1).unwrap();
+        assert_eq!(buf.block.size(), 4 * Buffer::BLOCK_SIZE);
+
+        let ret = buf.grow(Buffer::MAX_CAPACITY);
+        assert!(ret.is_err());
+    }
+
+    #[test]
+    fn test_buffer_ensure_capacity() {
+        // Initial state: 1 byte capacity left, initial size.
+        let mut buf = Buffer::new();
+        buf.extend_used(Buffer::BLOCK_SIZE - 1);
+        assert_eq!(buf.free_as_mut_slice().len(), 1);
+        assert_eq!(buf.block.size(), Buffer::BLOCK_SIZE);
+
+        // Still has capacity, no size request.
+        buf.ensure_capacity(None).unwrap();
+        assert_eq!(buf.free_as_mut_slice().len(), 1);
+        assert_eq!(buf.block.size(), Buffer::BLOCK_SIZE);
+
+        // No more capacity, initial size.
+        buf.extend_used(1);
+        assert_eq!(buf.free_as_mut_slice().len(), 0);
+        assert_eq!(buf.block.size(), Buffer::BLOCK_SIZE);
+
+        // No capacity, no size request.
+        buf.ensure_capacity(None).unwrap();
+        assert_eq!(buf.free_as_mut_slice().len(), Buffer::BLOCK_SIZE);
+        assert_eq!(buf.block.size(), 2 * Buffer::BLOCK_SIZE);
+
+        // Some capacity, size request.
+        buf.extend_used(5);
+        assert_eq!(buf.offset, Buffer::BLOCK_SIZE + 5);
+        buf.ensure_capacity(Some(3 * Buffer::BLOCK_SIZE - 6))
+            .unwrap();
+        assert_eq!(buf.free_as_mut_slice().len(), 2 * Buffer::BLOCK_SIZE - 5);
+        assert_eq!(buf.block.size(), 3 * Buffer::BLOCK_SIZE);
+    }
+
+    #[test]
+    fn test_buffer_take_and_return_block() {
+        // This test identifies blocks by their size.
+        let mut buf = Buffer::new();
+        buf.grow(1).unwrap();
+        let block_size = buf.block.size();
+
+        let block = buf.take_block();
+        assert_eq!(block.size(), block_size);
+        assert_ne!(buf.block.size(), block_size);
+
+        buf.return_block(block);
+        assert_eq!(buf.block.size(), block_size);
+    }
+
+    #[test]
+    fn test_buffer_reset_with_data() {
+        // This test identifies blocks by their size.
+        let data: [u8; 2 * Buffer::BLOCK_SIZE] = ['a' as u8; 2 * Buffer::BLOCK_SIZE];
+        let mut buf = Buffer::new();
+        let block_size = buf.block.size();
+        assert_eq!(block_size, Buffer::BLOCK_SIZE);
+        buf.reset_with_data(&data);
+        assert_ne!(buf.block.size(), block_size);
+        assert_eq!(buf.block.size(), 3 * Buffer::BLOCK_SIZE);
+        assert!(buf.free_as_mut_slice().len() > 0);
+
+        let data: [u8; 0] = [];
+        let mut buf = Buffer::new();
+        buf.reset_with_data(&data);
+        assert_eq!(buf.block.size(), Buffer::BLOCK_SIZE);
     }
 }
