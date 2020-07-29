@@ -32,7 +32,7 @@ pin-utils = "0.1.0-alpha.4"
 futures = "0.3.0"
 rental = "0.5.5"
 stop-token = { version = "0.1.1", features = ["unstable"] }
-byte-pool = "0.2.1"
+byte-pool = "0.2.2"
 lazy_static = "1.4.0"
 log = "0.4.8"
 thiserror = "1.0.9"
