@@ -1,5 +1,5 @@
-use std::pin::Pin;
 use std::fmt;
+use std::pin::Pin;
 
 use async_std::io::{self, Read, Write};
 use async_std::prelude::*;
@@ -434,6 +434,9 @@ mod tests {
 
     #[test]
     fn test_buffer_debug() {
-        assert_eq!(format!("{:?}", Buffer::new()), r#"Buffer(<block>)"#);
+        assert_eq!(
+            format!("{:?}", Buffer::new()),
+            format!(r#"Buffer {{ used: 0, capacity: {} }}"#, Buffer::BLOCK_SIZE)
+        );
     }
 }
