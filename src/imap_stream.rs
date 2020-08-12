@@ -336,8 +336,7 @@ mod tests {
     fn test_buffer_write_read() {
         let mut buf = Buffer::new();
         let mut slice = buf.free_as_mut_slice();
-        slice.write(b"hello").unwrap();
-        std::mem::drop(slice);
+        slice.write_all(b"hello").unwrap();
         buf.extend_used(b"hello".len());
 
         let slice = &buf.block[..buf.used()];
@@ -409,14 +408,14 @@ mod tests {
     #[test]
     fn test_buffer_reset_with_data() {
         // This test identifies blocks by their size.
-        let data: [u8; 2 * Buffer::BLOCK_SIZE] = ['a' as u8; 2 * Buffer::BLOCK_SIZE];
+        let data: [u8; 2 * Buffer::BLOCK_SIZE] = [b'a'; 2 * Buffer::BLOCK_SIZE];
         let mut buf = Buffer::new();
         let block_size = buf.block.size();
         assert_eq!(block_size, Buffer::BLOCK_SIZE);
         buf.reset_with_data(&data);
         assert_ne!(buf.block.size(), block_size);
         assert_eq!(buf.block.size(), 3 * Buffer::BLOCK_SIZE);
-        assert!(buf.free_as_mut_slice().len() > 0);
+        assert!(!buf.free_as_mut_slice().is_empty());
 
         let data: [u8; 0] = [];
         let mut buf = Buffer::new();

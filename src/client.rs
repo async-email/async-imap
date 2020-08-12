@@ -64,10 +64,6 @@ pub struct Client<T: Read + Write + Unpin + fmt::Debug> {
 pub struct Connection<T: Read + Write + Unpin + fmt::Debug> {
     pub(crate) stream: ImapStream<T>,
 
-    /// Enable debug mode for this connection so that all client-server interactions are printed to
-    /// `STDERR`.
-    pub debug: bool,
-
     /// Manages the request ids.
     pub(crate) request_ids: IdGenerator,
 }
@@ -192,7 +188,6 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Client<T> {
         Client {
             conn: Connection {
                 stream,
-                debug: false,
                 request_ids: IdGenerator::new(),
             },
         }
@@ -1542,7 +1537,7 @@ mod tests {
     #[async_std::test]
     async fn logout() {
         let response = b"A0001 OK Logout completed.\r\n".to_vec();
-        let command = format!("A0001 LOGOUT\r\n");
+        let command = "A0001 LOGOUT\r\n";
         let mock_stream = MockStream::new(response);
         let mut session = mock_session!(mock_stream);
         session.logout().await.unwrap();
@@ -2044,7 +2039,7 @@ mod tests {
     #[test]
     fn validate_newline() {
         if let Err(ref e) = validate_str("test\nstring") {
-            if let &Error::Validate(ref ve) = e {
+            if let Error::Validate(ref ve) = e {
                 if ve.0 == '\n' {
                     return;
                 }
@@ -2058,7 +2053,7 @@ mod tests {
     #[allow(unreachable_patterns)]
     fn validate_carriage_return() {
         if let Err(ref e) = validate_str("test\rstring") {
-            if let &Error::Validate(ref ve) = e {
+            if let Error::Validate(ref ve) = e {
                 if ve.0 == '\r' {
                     return;
                 }

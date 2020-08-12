@@ -21,11 +21,12 @@ fn main() -> Result<()> {
 
 async fn fetch_and_idle(imap_server: &str, login: &str, password: &str) -> Result<()> {
     let tls = async_native_tls::TlsConnector::new();
+    let imap_addr = (imap_server, 993);
 
     // we pass in the imap_server twice to check that the server's TLS
     // certificate is valid for the imap_server we're connecting to.
-    let client = async_imap::connect((imap_server, 993), imap_server, tls).await?;
-    println!("-- connected to {}:{}", imap_server, 993);
+    let client = async_imap::connect(imap_addr, imap_server, tls).await?;
+    println!("-- connected to {}:{}", imap_addr.0, imap_addr.1);
 
     // the client we have here is unauthenticated.
     // to do anything useful with the e-mails, we need to log in
