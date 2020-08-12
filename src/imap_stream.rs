@@ -1,4 +1,5 @@
 use std::pin::Pin;
+use std::fmt;
 
 use async_std::io::{self, Read, Write};
 use async_std::prelude::*;
@@ -150,7 +151,6 @@ impl<R: Read + Write + Unpin> ImapStream<R> {
 }
 
 /// Abstraction around needed buffer management.
-#[derive(Debug)]
 struct Buffer {
     /// The buffer itself.
     block: Block<'static>,
@@ -263,6 +263,15 @@ impl Buffer {
     /// Return the block which backs this buffer.
     fn return_block(&mut self, block: Block<'static>) {
         self.block = block;
+    }
+}
+
+impl fmt::Debug for Buffer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Buffer")
+            .field("used", &self.used())
+            .field("capacity", &self.block.size())
+            .finish()
     }
 }
 
@@ -421,5 +430,10 @@ mod tests {
         let mut buf = Buffer::new();
         buf.reset_with_data(&data);
         assert_eq!(buf.block.size(), Buffer::BLOCK_SIZE);
+    }
+
+    #[test]
+    fn test_buffer_debug() {
+        assert_eq!(format!("{:?}", Buffer::new()), r#"Buffer(<block>)"#);
     }
 }
