@@ -255,9 +255,9 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Client<T> {
     ///     access_token: String,
     /// }
     ///
-    /// impl async_imap::Authenticator for OAuth2 {
+    /// impl async_imap::Authenticator for &OAuth2 {
     ///     type Response = String;
-    ///     fn process(&self, _: &[u8]) -> Self::Response {
+    ///     fn process(&mut self, _: &[u8]) -> Self::Response {
     ///         format!(
     ///             "user={}\x01auth=Bearer {}\x01\x01",
     ///             self.user, self.access_token
@@ -292,7 +292,7 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Client<T> {
     pub async fn authenticate<A: Authenticator, S: AsRef<str>>(
         mut self,
         auth_type: S,
-        authenticator: &A,
+        authenticator: A,
     ) -> ::std::result::Result<Session<T>, (Error, Client<T>)> {
         let id = ok_or_unauth_client_err!(
             self.run_command(&format!("AUTHENTICATE {}", auth_type.as_ref()))
@@ -307,7 +307,7 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Client<T> {
     async fn do_auth_handshake<A: Authenticator>(
         mut self,
         id: RequestId,
-        authenticator: &A,
+        mut authenticator: A,
     ) -> ::std::result::Result<Session<T>, (Error, Client<T>)> {
         // explicit match blocks neccessary to convert error to tuple and not bind self too
         // early (see also comment on `login`)
@@ -326,7 +326,7 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Client<T> {
                         } else {
                             Vec::new()
                         };
-                        let raw_response = &authenticator.process(&challenge);
+                        let raw_response = &mut authenticator.process(&challenge);
                         let auth_response = base64::encode(raw_response);
 
                         ok_or_unauth_client_err!(
@@ -1496,9 +1496,9 @@ mod tests {
         enum Authenticate {
             Auth,
         };
-        impl Authenticator for Authenticate {
+        impl Authenticator for &Authenticate {
             type Response = Vec<u8>;
-            fn process(&self, challenge: &[u8]) -> Self::Response {
+            fn process(&mut self, challenge: &[u8]) -> Self::Response {
                 assert!(challenge == b"bar", "Invalid authenticate challenge");
                 b"foo".to_vec()
             }
