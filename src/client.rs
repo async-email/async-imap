@@ -299,58 +299,57 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Client<T> {
         auth_type: S,
         authenticator: &A,
     ) -> ::std::result::Result<Session<T>, (Error, Client<T>)> {
-        ok_or_unauth_client_err!(
+        let id = ok_or_unauth_client_err!(
             self.run_command(&format!("AUTHENTICATE {}", auth_type.as_ref()))
                 .await,
             self
         );
-        let session = self.do_auth_handshake(authenticator).await?;
-
+        let session = self.do_auth_handshake(id, authenticator).await?;
         Ok(session)
     }
 
     /// This func does the handshake process once the authenticate command is made.
     async fn do_auth_handshake<A: Authenticator>(
         mut self,
+        id: RequestId,
         authenticator: &A,
     ) -> ::std::result::Result<Session<T>, (Error, Client<T>)> {
         // explicit match blocks neccessary to convert error to tuple and not bind self too
         // early (see also comment on `login`)
-        if let Some(res) = self.read_response().await {
-            // FIXME: Some servers will only send `+\r\n` need to handle that in imap_proto.
-            // https://github.com/djc/tokio-imap/issues/67
-            let res = ok_or_unauth_client_err!(res.map_err(Into::into), self);
-            match res.parsed() {
-                Response::Continue { information, .. } => {
-                    let challenge = if let Some(text) = information {
-                        ok_or_unauth_client_err!(
-                            base64::decode(text).map_err(|e| Error::Parse(
-                                ParseError::Authentication((*text).to_string(), Some(e))
-                            )),
-                            self
-                        )
-                    } else {
-                        Vec::new()
-                    };
-                    let raw_response = &authenticator.process(&challenge);
-                    let auth_response = base64::encode(raw_response);
+        loop {
+            if let Some(res) = self.read_response().await {
+                let res = ok_or_unauth_client_err!(res.map_err(Into::into), self);
+                match res.parsed() {
+                    Response::Continue { information, .. } => {
+                        let challenge = if let Some(text) = information {
+                            ok_or_unauth_client_err!(
+                                base64::decode(text).map_err(|e| Error::Parse(
+                                    ParseError::Authentication((*text).to_string(), Some(e))
+                                )),
+                                self
+                            )
+                        } else {
+                            Vec::new()
+                        };
+                        let raw_response = &authenticator.process(&challenge);
+                        let auth_response = base64::encode(raw_response);
 
-                    ok_or_unauth_client_err!(
-                        self.conn.run_command_untagged(&auth_response).await,
-                        self
-                    );
-                    Ok(Session::new(self.conn))
-                }
-                _ => {
-                    if self.read_response().await.is_some() {
-                        Ok(Session::new(self.conn))
-                    } else {
-                        Err((Error::ConnectionLost, self))
+                        ok_or_unauth_client_err!(
+                            self.conn.run_command_untagged(&auth_response).await,
+                            self
+                        );
+                    }
+                    _ => {
+                        ok_or_unauth_client_err!(
+                            self.check_done_ok_from(&id, None, res).await,
+                            self
+                        );
+                        return Ok(Session::new(self.conn));
                     }
                 }
+            } else {
+                return Err((Error::ConnectionLost, self));
             }
-        } else {
-            Err((Error::ConnectionLost, self))
         }
     }
 }
@@ -1322,63 +1321,81 @@ impl<T: Read + Write + Unpin + fmt::Debug> Connection<T> {
         unsolicited: Option<sync::Sender<UnsolicitedResponse>>,
     ) -> Result<()> {
         let id = self.run_command(command).await?;
-        self.check_ok(id, unsolicited).await?;
+        self.check_done_ok(&id, unsolicited).await?;
 
         Ok(())
     }
 
-    pub(crate) async fn check_ok(
+    pub(crate) async fn check_done_ok(
         &mut self,
-        id: RequestId,
+        id: &RequestId,
         unsolicited: Option<sync::Sender<UnsolicitedResponse>>,
     ) -> Result<()> {
-        while let Some(res) = self.stream.next().await {
-            let res = res?;
+        if let Some(first_res) = self.stream.next().await {
+            self.check_done_ok_from(id, unsolicited, first_res?).await
+        } else {
+            Err(Error::ConnectionLost)
+        }
+    }
+
+    pub(crate) async fn check_done_ok_from(
+        &mut self,
+        id: &RequestId,
+        unsolicited: Option<sync::Sender<UnsolicitedResponse>>,
+        mut response: ResponseData,
+    ) -> Result<()> {
+        loop {
             if let Response::Done {
                 status,
                 code,
                 information,
                 tag,
-            } = res.parsed()
+            } = response.parsed()
             {
-                use imap_proto::Status;
-                match status {
-                    Status::Ok => {
-                        if tag != &id {
-                            if let Some(unsolicited) = unsolicited.clone() {
-                                handle_unilateral(res, unsolicited).await;
-                            }
-                            continue;
-                        }
+                self.check_status_ok(status, code.as_ref(), *information)?;
 
-                        return Ok(());
-                    }
-                    Status::Bad => {
-                        return Err(Error::Bad(format!(
-                            "code: {:?}, info: {:?}",
-                            code, information
-                        )))
-                    }
-                    Status::No => {
-                        return Err(Error::No(format!(
-                            "code: {:?}, info: {:?}",
-                            code, information
-                        )))
-                    }
-                    _ => {
-                        return Err(Error::Io(io::Error::new(
-                            io::ErrorKind::Other,
-                            format!(
-                                "status: {:?}, code: {:?}, information: {:?}",
-                                status, code, information
-                            ),
-                        )));
-                    }
+                if tag == id {
+                    return Ok(());
                 }
             }
-        }
 
-        Err(Error::ConnectionLost)
+            if let Some(unsolicited) = unsolicited.clone() {
+                handle_unilateral(response, unsolicited).await;
+            }
+
+            if let Some(res) = self.stream.next().await {
+                response = res?;
+            } else {
+                return Err(Error::ConnectionLost);
+            }
+        }
+    }
+
+    pub(crate) fn check_status_ok(
+        &self,
+        status: &imap_proto::Status,
+        code: Option<&imap_proto::ResponseCode<'_>>,
+        information: Option<&str>,
+    ) -> Result<()> {
+        use imap_proto::Status;
+        match status {
+            Status::Ok => Ok(()),
+            Status::Bad => Err(Error::Bad(format!(
+                "code: {:?}, info: {:?}",
+                code, information
+            ))),
+            Status::No => Err(Error::No(format!(
+                "code: {:?}, info: {:?}",
+                code, information
+            ))),
+            _ => Err(Error::Io(io::Error::new(
+                io::ErrorKind::Other,
+                format!(
+                    "status: {:?}, code: {:?}, information: {:?}",
+                    status, code, information
+                ),
+            ))),
+        }
     }
 }
 
