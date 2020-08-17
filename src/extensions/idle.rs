@@ -207,7 +207,7 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Handle<T> {
         self.session.run_command_untagged("DONE").await?;
         let sender = self.session.unsolicited_responses_tx.clone();
         self.session
-            .check_ok(self.id.expect("invalid setup"), Some(sender))
+            .check_done_ok(&self.id.expect("invalid setup"), Some(sender))
             .await?;
 
         Ok(self.session)

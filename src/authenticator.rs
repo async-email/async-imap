@@ -6,5 +6,5 @@ pub trait Authenticator {
 
     /// Each base64-decoded server challenge is passed to `process`.
     /// The returned byte-string is base64-encoded and then sent back to the server.
-    fn process(&self, challenge: &[u8]) -> Self::Response;
+    fn process(&mut self, challenge: &[u8]) -> Self::Response;
 }

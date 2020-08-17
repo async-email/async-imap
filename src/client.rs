@@ -64,10 +64,6 @@ pub struct Client<T: Read + Write + Unpin + fmt::Debug> {
 pub struct Connection<T: Read + Write + Unpin + fmt::Debug> {
     pub(crate) stream: ImapStream<T>,
 
-    /// Enable debug mode for this connection so that all client-server interactions are printed to
-    /// `STDERR`.
-    pub debug: bool,
-
     /// Manages the request ids.
     pub(crate) request_ids: IdGenerator,
 }
@@ -192,7 +188,6 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Client<T> {
         Client {
             conn: Connection {
                 stream,
-                debug: false,
                 request_ids: IdGenerator::new(),
             },
         }
@@ -260,9 +255,9 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Client<T> {
     ///     access_token: String,
     /// }
     ///
-    /// impl async_imap::Authenticator for OAuth2 {
+    /// impl async_imap::Authenticator for &OAuth2 {
     ///     type Response = String;
-    ///     fn process(&self, _: &[u8]) -> Self::Response {
+    ///     fn process(&mut self, _: &[u8]) -> Self::Response {
     ///         format!(
     ///             "user={}\x01auth=Bearer {}\x01\x01",
     ///             self.user, self.access_token
@@ -297,60 +292,59 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Client<T> {
     pub async fn authenticate<A: Authenticator, S: AsRef<str>>(
         mut self,
         auth_type: S,
-        authenticator: &A,
+        authenticator: A,
     ) -> ::std::result::Result<Session<T>, (Error, Client<T>)> {
-        ok_or_unauth_client_err!(
+        let id = ok_or_unauth_client_err!(
             self.run_command(&format!("AUTHENTICATE {}", auth_type.as_ref()))
                 .await,
             self
         );
-        let session = self.do_auth_handshake(authenticator).await?;
-
+        let session = self.do_auth_handshake(id, authenticator).await?;
         Ok(session)
     }
 
     /// This func does the handshake process once the authenticate command is made.
     async fn do_auth_handshake<A: Authenticator>(
         mut self,
-        authenticator: &A,
+        id: RequestId,
+        mut authenticator: A,
     ) -> ::std::result::Result<Session<T>, (Error, Client<T>)> {
         // explicit match blocks neccessary to convert error to tuple and not bind self too
         // early (see also comment on `login`)
-        if let Some(res) = self.read_response().await {
-            // FIXME: Some servers will only send `+\r\n` need to handle that in imap_proto.
-            // https://github.com/djc/tokio-imap/issues/67
-            let res = ok_or_unauth_client_err!(res.map_err(Into::into), self);
-            match res.parsed() {
-                Response::Continue { information, .. } => {
-                    let challenge = if let Some(text) = information {
-                        ok_or_unauth_client_err!(
-                            base64::decode(text).map_err(|e| Error::Parse(
-                                ParseError::Authentication((*text).to_string(), Some(e))
-                            )),
-                            self
-                        )
-                    } else {
-                        Vec::new()
-                    };
-                    let raw_response = &authenticator.process(&challenge);
-                    let auth_response = base64::encode(raw_response);
+        loop {
+            if let Some(res) = self.read_response().await {
+                let res = ok_or_unauth_client_err!(res.map_err(Into::into), self);
+                match res.parsed() {
+                    Response::Continue { information, .. } => {
+                        let challenge = if let Some(text) = information {
+                            ok_or_unauth_client_err!(
+                                base64::decode(text).map_err(|e| Error::Parse(
+                                    ParseError::Authentication((*text).to_string(), Some(e))
+                                )),
+                                self
+                            )
+                        } else {
+                            Vec::new()
+                        };
+                        let raw_response = &mut authenticator.process(&challenge);
+                        let auth_response = base64::encode(raw_response);
 
-                    ok_or_unauth_client_err!(
-                        self.conn.run_command_untagged(&auth_response).await,
-                        self
-                    );
-                    Ok(Session::new(self.conn))
-                }
-                _ => {
-                    if self.read_response().await.is_some() {
-                        Ok(Session::new(self.conn))
-                    } else {
-                        Err((Error::ConnectionLost, self))
+                        ok_or_unauth_client_err!(
+                            self.conn.run_command_untagged(&auth_response).await,
+                            self
+                        );
+                    }
+                    _ => {
+                        ok_or_unauth_client_err!(
+                            self.check_done_ok_from(&id, None, res).await,
+                            self
+                        );
+                        return Ok(Session::new(self.conn));
                     }
                 }
+            } else {
+                return Err((Error::ConnectionLost, self));
             }
-        } else {
-            Err((Error::ConnectionLost, self))
         }
     }
 }
@@ -1322,63 +1316,81 @@ impl<T: Read + Write + Unpin + fmt::Debug> Connection<T> {
         unsolicited: Option<sync::Sender<UnsolicitedResponse>>,
     ) -> Result<()> {
         let id = self.run_command(command).await?;
-        self.check_ok(id, unsolicited).await?;
+        self.check_done_ok(&id, unsolicited).await?;
 
         Ok(())
     }
 
-    pub(crate) async fn check_ok(
+    pub(crate) async fn check_done_ok(
         &mut self,
-        id: RequestId,
+        id: &RequestId,
         unsolicited: Option<sync::Sender<UnsolicitedResponse>>,
     ) -> Result<()> {
-        while let Some(res) = self.stream.next().await {
-            let res = res?;
+        if let Some(first_res) = self.stream.next().await {
+            self.check_done_ok_from(id, unsolicited, first_res?).await
+        } else {
+            Err(Error::ConnectionLost)
+        }
+    }
+
+    pub(crate) async fn check_done_ok_from(
+        &mut self,
+        id: &RequestId,
+        unsolicited: Option<sync::Sender<UnsolicitedResponse>>,
+        mut response: ResponseData,
+    ) -> Result<()> {
+        loop {
             if let Response::Done {
                 status,
                 code,
                 information,
                 tag,
-            } = res.parsed()
+            } = response.parsed()
             {
-                use imap_proto::Status;
-                match status {
-                    Status::Ok => {
-                        if tag != &id {
-                            if let Some(unsolicited) = unsolicited.clone() {
-                                handle_unilateral(res, unsolicited).await;
-                            }
-                            continue;
-                        }
+                self.check_status_ok(status, code.as_ref(), *information)?;
 
-                        return Ok(());
-                    }
-                    Status::Bad => {
-                        return Err(Error::Bad(format!(
-                            "code: {:?}, info: {:?}",
-                            code, information
-                        )))
-                    }
-                    Status::No => {
-                        return Err(Error::No(format!(
-                            "code: {:?}, info: {:?}",
-                            code, information
-                        )))
-                    }
-                    _ => {
-                        return Err(Error::Io(io::Error::new(
-                            io::ErrorKind::Other,
-                            format!(
-                                "status: {:?}, code: {:?}, information: {:?}",
-                                status, code, information
-                            ),
-                        )));
-                    }
+                if tag == id {
+                    return Ok(());
                 }
             }
-        }
 
-        Err(Error::ConnectionLost)
+            if let Some(unsolicited) = unsolicited.clone() {
+                handle_unilateral(response, unsolicited).await;
+            }
+
+            if let Some(res) = self.stream.next().await {
+                response = res?;
+            } else {
+                return Err(Error::ConnectionLost);
+            }
+        }
+    }
+
+    pub(crate) fn check_status_ok(
+        &self,
+        status: &imap_proto::Status,
+        code: Option<&imap_proto::ResponseCode<'_>>,
+        information: Option<&str>,
+    ) -> Result<()> {
+        use imap_proto::Status;
+        match status {
+            Status::Ok => Ok(()),
+            Status::Bad => Err(Error::Bad(format!(
+                "code: {:?}, info: {:?}",
+                code, information
+            ))),
+            Status::No => Err(Error::No(format!(
+                "code: {:?}, info: {:?}",
+                code, information
+            ))),
+            _ => Err(Error::Io(io::Error::new(
+                io::ErrorKind::Other,
+                format!(
+                    "status: {:?}, code: {:?}, information: {:?}",
+                    status, code, information
+                ),
+            ))),
+        }
     }
 }
 
@@ -1484,9 +1496,9 @@ mod tests {
         enum Authenticate {
             Auth,
         };
-        impl Authenticator for Authenticate {
+        impl Authenticator for &Authenticate {
             type Response = Vec<u8>;
-            fn process(&self, challenge: &[u8]) -> Self::Response {
+            fn process(&mut self, challenge: &[u8]) -> Self::Response {
                 assert!(challenge == b"bar", "Invalid authenticate challenge");
                 b"foo".to_vec()
             }
@@ -1525,7 +1537,7 @@ mod tests {
     #[async_std::test]
     async fn logout() {
         let response = b"A0001 OK Logout completed.\r\n".to_vec();
-        let command = format!("A0001 LOGOUT\r\n");
+        let command = "A0001 LOGOUT\r\n";
         let mock_stream = MockStream::new(response);
         let mut session = mock_session!(mock_stream);
         session.logout().await.unwrap();
@@ -2027,7 +2039,7 @@ mod tests {
     #[test]
     fn validate_newline() {
         if let Err(ref e) = validate_str("test\nstring") {
-            if let &Error::Validate(ref ve) = e {
+            if let Error::Validate(ref ve) = e {
                 if ve.0 == '\n' {
                     return;
                 }
@@ -2041,7 +2053,7 @@ mod tests {
     #[allow(unreachable_patterns)]
     fn validate_carriage_return() {
         if let Err(ref e) = validate_str("test\rstring") {
-            if let &Error::Validate(ref ve) = e {
+            if let Error::Validate(ref ve) = e {
                 if ve.0 == '\r' {
                     return;
                 }

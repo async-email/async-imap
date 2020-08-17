@@ -18,33 +18,25 @@ fn tls() -> TlsConnector {
         .danger_accept_invalid_certs(true)
 }
 
+fn test_host() -> String {
+    std::env::var("TEST_HOST").unwrap_or_else(|_| "127.0.0.1".into())
+}
+
 async fn session(user: &str) -> Session<async_native_tls::TlsStream<TcpStream>> {
-    let mut s = async_imap::connect(
-        &format!(
-            "{}:3993",
-            std::env::var("TEST_HOST").unwrap_or("127.0.0.1".to_string())
-        ),
-        "imap.example.com",
-        tls(),
-    )
-    .await
-    .unwrap()
-    .login(user, user)
-    .await
-    .ok()
-    .unwrap();
-    s.debug = true;
-    s
+    async_imap::connect(&format!("{}:3993", test_host()), "imap.example.com", tls())
+        .await
+        .unwrap()
+        .login(user, user)
+        .await
+        .ok()
+        .unwrap()
 }
 
 async fn smtp(user: &str) -> async_smtp::SmtpTransport {
     let creds =
         async_smtp::smtp::authentication::Credentials::new(user.to_string(), user.to_string());
     async_smtp::SmtpClient::with_security(
-        &format!(
-            "{}:3465",
-            std::env::var("TEST_HOST").unwrap_or("127.0.0.1".to_string())
-        ),
+        &format!("{}:3465", test_host()),
         async_smtp::ClientSecurity::Wrapper(async_smtp::ClientTlsParameters {
             connector: native_tls(),
             domain: "localhost".to_string(),
@@ -59,8 +51,9 @@ async fn smtp(user: &str) -> async_smtp::SmtpTransport {
 // #[test]
 fn _connect_insecure_then_secure() {
     task::block_on(async {
-        let host = std::env::var("TEST_HOST").unwrap_or("127.0.0.1".to_string());
-        let stream = TcpStream::connect((host.as_ref(), 3143)).await.unwrap();
+        let stream = TcpStream::connect((test_host().as_ref(), 3143))
+            .await
+            .unwrap();
 
         // ignored because of https://github.com/greenmail-mail-test/greenmail/issues/135
         async_imap::Client::new(stream)
@@ -74,16 +67,9 @@ fn _connect_insecure_then_secure() {
 #[ignore]
 fn connect_secure() {
     task::block_on(async {
-        async_imap::connect(
-            &format!(
-                "{}:3993",
-                std::env::var("TEST_HOST").unwrap_or("127.0.0.1".to_string())
-            ),
-            "imap.example.com",
-            tls(),
-        )
-        .await
-        .unwrap();
+        async_imap::connect(&format!("{}:3993", test_host()), "imap.example.com", tls())
+            .await
+            .unwrap();
     });
 }
 

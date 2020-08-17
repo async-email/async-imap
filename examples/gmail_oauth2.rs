@@ -7,10 +7,10 @@ struct GmailOAuth2 {
     access_token: String,
 }
 
-impl async_imap::Authenticator for GmailOAuth2 {
+impl async_imap::Authenticator for &GmailOAuth2 {
     type Response = String;
-    #[allow(unused_variables)]
-    fn process(&self, data: &[u8]) -> Self::Response {
+
+    fn process(&mut self, _data: &[u8]) -> Self::Response {
         format!(
             "user={}\x01auth=Bearer {}\x01\x01",
             self.user, self.access_token
