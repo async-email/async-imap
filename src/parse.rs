@@ -239,6 +239,7 @@ pub(crate) async fn parse_mailbox<T: Stream<Item = io::Result<ResponseData>> + U
                 MailboxDatum::List { .. } => {}
                 MailboxDatum::MetadataSolicited { .. } => {}
                 MailboxDatum::MetadataUnsolicited { .. } => {}
+                MailboxDatum::Search { .. } => {}
             },
             _ => {
                 handle_unilateral(resp, unsolicited.clone()).await;
@@ -263,7 +264,7 @@ pub(crate) async fn parse_ids<T: Stream<Item = io::Result<ResponseData>> + Unpin
     {
         let resp = resp?;
         match resp.parsed() {
-            Response::IDs(cs) => {
+            Response::MailboxData(MailboxDatum::Search(cs)) => {
                 for c in cs {
                     ids.insert(*c);
                 }
@@ -333,7 +334,7 @@ mod tests {
                 let mut block = crate::imap_stream::POOL.alloc(line.as_bytes().len());
                 block.copy_from_slice(line.as_bytes());
                 ResponseData::try_new(block, |bytes| -> io::Result<_> {
-                    let (remaining, response) = imap_proto::parse_response(bytes).unwrap();
+                    let (remaining, response) = imap_proto::parser::parse_response(bytes).unwrap();
                     assert_eq!(remaining.len(), 0);
                     Ok(response)
                 })
