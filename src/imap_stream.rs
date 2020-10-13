@@ -111,7 +111,7 @@ impl<R: Read + Write + Unpin> ImapStream<R> {
         let res = ResponseData::try_new(block, |buf| {
             let buf = &buf[..self.buffer.used()];
             log::trace!("decode: input: {:?}", std::str::from_utf8(buf));
-            match imap_proto::parse_response(buf) {
+            match imap_proto::parser::parse_response(buf) {
                 Ok((remaining, response)) => {
                     // TODO: figure out if we can use a minimum required size for a response.
                     self.decode_needs = None;
