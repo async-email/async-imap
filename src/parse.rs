@@ -10,11 +10,11 @@ use crate::error::{Error, Result};
 use crate::types::ResponseData;
 use crate::types::*;
 
-pub(crate) fn parse_names<'a, T: Stream<Item = io::Result<ResponseData>> + Unpin + Send>(
-    stream: &'a mut T,
+pub(crate) fn parse_names<T: Stream<Item = io::Result<ResponseData>> + Unpin + Send>(
+    stream: &mut T,
     unsolicited: channel::Sender<UnsolicitedResponse>,
     command_tag: RequestId,
-) -> impl Stream<Item = Result<Name>> + 'a + Send + Unpin {
+) -> impl Stream<Item = Result<Name>> + '_ + Send + Unpin {
     use futures::{FutureExt, StreamExt};
 
     StreamExt::filter_map(
@@ -56,11 +56,11 @@ fn filter_sync(res: &io::Result<ResponseData>, command_tag: &RequestId) -> bool 
     }
 }
 
-pub(crate) fn parse_fetches<'a, T: Stream<Item = io::Result<ResponseData>> + Unpin + Send>(
-    stream: &'a mut T,
+pub(crate) fn parse_fetches<T: Stream<Item = io::Result<ResponseData>> + Unpin + Send>(
+    stream: &mut T,
     unsolicited: channel::Sender<UnsolicitedResponse>,
     command_tag: RequestId,
-) -> impl Stream<Item = Result<Fetch>> + 'a + Send + Unpin {
+) -> impl Stream<Item = Result<Fetch>> + '_ + Send + Unpin {
     use futures::{FutureExt, StreamExt};
 
     StreamExt::filter_map(
@@ -85,11 +85,11 @@ pub(crate) fn parse_fetches<'a, T: Stream<Item = io::Result<ResponseData>> + Unp
     )
 }
 
-pub(crate) fn parse_expunge<'a, T: Stream<Item = io::Result<ResponseData>> + Unpin + Send>(
-    stream: &'a mut T,
+pub(crate) fn parse_expunge<T: Stream<Item = io::Result<ResponseData>> + Unpin + Send>(
+    stream: &mut T,
     unsolicited: channel::Sender<UnsolicitedResponse>,
     command_tag: RequestId,
-) -> impl Stream<Item = Result<u32>> + 'a + Send {
+) -> impl Stream<Item = Result<u32>> + '_ + Send {
     use futures::StreamExt;
 
     StreamExt::filter_map(
@@ -113,8 +113,8 @@ pub(crate) fn parse_expunge<'a, T: Stream<Item = io::Result<ResponseData>> + Unp
     )
 }
 
-pub(crate) async fn parse_capabilities<'a, T: Stream<Item = io::Result<ResponseData>> + Unpin>(
-    stream: &'a mut T,
+pub(crate) async fn parse_capabilities<T: Stream<Item = io::Result<ResponseData>> + Unpin>(
+    stream: &mut T,
     unsolicited: channel::Sender<UnsolicitedResponse>,
     command_tag: RequestId,
 ) -> Result<Capabilities> {
