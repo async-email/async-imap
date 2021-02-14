@@ -5,10 +5,10 @@ use std::pin::Pin;
 use std::str;
 
 use async_native_tls::{TlsConnector, TlsStream};
+use async_std::channel;
 use async_std::io::{self, Read, Write};
 use async_std::net::{TcpStream, ToSocketAddrs};
 use async_std::prelude::*;
-use async_std::sync;
 use imap_proto::{RequestId, Response};
 
 use super::authenticator::Authenticator;
@@ -36,11 +36,11 @@ macro_rules! quote {
 #[derive(Debug)]
 pub struct Session<T: Read + Write + Unpin + fmt::Debug> {
     pub(crate) conn: Connection<T>,
-    pub(crate) unsolicited_responses_tx: sync::Sender<UnsolicitedResponse>,
+    pub(crate) unsolicited_responses_tx: channel::Sender<UnsolicitedResponse>,
 
     /// Server responses that are not related to the current command. See also the note on
     /// [unilateral server responses in RFC 3501](https://tools.ietf.org/html/rfc3501#section-7).
-    pub unsolicited_responses: sync::Receiver<UnsolicitedResponse>,
+    pub unsolicited_responses: channel::Receiver<UnsolicitedResponse>,
 }
 
 impl<T: Read + Write + Unpin + fmt::Debug> Unpin for Session<T> {}
@@ -358,7 +358,7 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Session<T> {
 
     // not public, just to avoid duplicating the channel creation code
     fn new(conn: Connection<T>) -> Self {
-        let (tx, rx) = sync::channel(100);
+        let (tx, rx) = channel::bounded(100);
         Session {
             conn,
             unsolicited_responses: rx,
@@ -1313,7 +1313,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Connection<T> {
     pub async fn run_command_and_check_ok(
         &mut self,
         command: &str,
-        unsolicited: Option<sync::Sender<UnsolicitedResponse>>,
+        unsolicited: Option<channel::Sender<UnsolicitedResponse>>,
     ) -> Result<()> {
         let id = self.run_command(command).await?;
         self.check_done_ok(&id, unsolicited).await?;
@@ -1324,7 +1324,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Connection<T> {
     pub(crate) async fn check_done_ok(
         &mut self,
         id: &RequestId,
-        unsolicited: Option<sync::Sender<UnsolicitedResponse>>,
+        unsolicited: Option<channel::Sender<UnsolicitedResponse>>,
     ) -> Result<()> {
         if let Some(first_res) = self.stream.next().await {
             self.check_done_ok_from(id, unsolicited, first_res?).await
@@ -1336,7 +1336,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Connection<T> {
     pub(crate) async fn check_done_ok_from(
         &mut self,
         id: &RequestId,
-        unsolicited: Option<sync::Sender<UnsolicitedResponse>>,
+        unsolicited: Option<channel::Sender<UnsolicitedResponse>>,
         mut response: ResponseData,
     ) -> Result<()> {
         loop {
@@ -1495,7 +1495,7 @@ mod tests {
         let client = mock_client!(mock_stream);
         enum Authenticate {
             Auth,
-        };
+        }
         impl Authenticator for &Authenticate {
             type Response = Vec<u8>;
             fn process(&mut self, challenge: &[u8]) -> Self::Response {
