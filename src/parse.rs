@@ -291,7 +291,7 @@ pub(crate) async fn handle_unilateral(
 
     match res.parsed() {
         Response::MailboxData(MailboxDatum::Status { mailbox, status }) => {
-            let _ = unsolicited
+            unsolicited
                 .send(UnsolicitedResponse::Status {
                     mailbox: (*mailbox).into(),
                     attributes: status
@@ -307,23 +307,32 @@ pub(crate) async fn handle_unilateral(
                         })
                         .collect(),
                 })
-                .await; //TODO: decide what to do with result
+                .await
+                .expect("Channel closed unexpectedly");
         }
         Response::MailboxData(MailboxDatum::Recent(n)) => {
-            //TODO: decide what to do with result
-            let _ = unsolicited.send(UnsolicitedResponse::Recent(*n)).await;
+            unsolicited
+                .send(UnsolicitedResponse::Recent(*n))
+                .await
+                .expect("Channel closed unexpectedly");
         }
         Response::MailboxData(MailboxDatum::Exists(n)) => {
-            //TODO: decide what to do with result
-            let _ = unsolicited.send(UnsolicitedResponse::Exists(*n)).await;
+            unsolicited
+                .send(UnsolicitedResponse::Exists(*n))
+                .await
+                .expect("Channel closed unexpectedly");
         }
         Response::Expunge(n) => {
-            //TODO: decide what to do with result
-            let _ = unsolicited.send(UnsolicitedResponse::Expunge(*n)).await;
+            unsolicited
+                .send(UnsolicitedResponse::Expunge(*n))
+                .await
+                .expect("Channel closed unexpectedly");
         }
         _ => {
-            //TODO: decide what to do with result
-            let _ = unsolicited.send(UnsolicitedResponse::Other(res)).await;
+            unsolicited
+                .send(UnsolicitedResponse::Other(res))
+                .await
+                .expect("Channel closed unexpectedly");
         }
     }
 }
