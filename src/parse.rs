@@ -342,7 +342,6 @@ mod tests {
                     assert_eq!(remaining.len(), 0);
                     Ok(response)
                 })
-                .map_err(|err: rental::RentalError<io::Error, _>| err.0)
             })
             .collect()
     }
