@@ -30,7 +30,7 @@ async-native-tls = { version = "0.3.3" }
 async-std = { version = "1.8.0", default-features = false, features = ["std"] }
 pin-utils = "0.1.0-alpha.4"
 futures = "0.3.0"
-rental = "0.5.5"
+ouroboros = "0.9"
 stop-token = "0.2"
 byte-pool = "0.2.2"
 lazy_static = "1.4.0"

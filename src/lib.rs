@@ -65,9 +65,6 @@
 #[macro_use]
 extern crate pin_utils;
 
-#[macro_use]
-extern crate rental;
-
 // Reexport imap_proto for easier access.
 pub use imap_proto;
 
