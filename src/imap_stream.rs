@@ -108,7 +108,7 @@ impl<R: Read + Write + Unpin> ImapStream<R> {
         let block: Block<'static> = self.buffer.take_block();
         // Be aware, now self.buffer is invalid until block is returned or reset!
 
-        let res = ResponseData::try_new(block, |buf| {
+        let res = ResponseData::try_new_or_recover(block, |buf| {
             let buf = &buf[..self.buffer.used()];
             log::trace!("decode: input: {:?}", std::str::from_utf8(buf));
             match imap_proto::parser::parse_response(buf) {
@@ -139,8 +139,8 @@ impl<R: Read + Write + Unpin> ImapStream<R> {
         });
         match res {
             Ok(response) => Ok(Some(response)),
-            Err(rental::RentalError(err, block)) => {
-                self.buffer.return_block(block);
+            Err((err, heads)) => {
+                self.buffer.return_block(heads.raw);
                 match err {
                     Some(err) => Err(err),
                     None => Ok(None),
