@@ -181,7 +181,7 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Handle<T> {
                         if let Status::Bad = status {
                             return Err(io::Error::new(
                                 io::ErrorKind::ConnectionRefused,
-                                information.unwrap().to_string(),
+                                information.as_ref().unwrap().to_string(),
                             )
                             .into());
                         }
