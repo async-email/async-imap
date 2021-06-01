@@ -46,7 +46,7 @@ fn filter(res: &io::Result<ResponseData>, command_tag: &RequestId) -> impl Futur
     futures::future::ready(val)
 }
 
-fn filter_sync(res: &io::Result<ResponseData>, command_tag: &RequestId) -> bool {
+pub(crate) fn filter_sync(res: &io::Result<ResponseData>, command_tag: &RequestId) -> bool {
     match res {
         Ok(res) => match res.parsed() {
             Response::Done { tag, .. } => tag != command_tag,
