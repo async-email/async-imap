@@ -298,16 +298,7 @@ pub(crate) async fn handle_unilateral(
                     mailbox: (mailbox.as_ref()).into(),
                     attributes: status
                         .iter()
-                        .map(|s| match s {
-                            // Fake clone
-                            StatusAttribute::HighestModSeq(a) => StatusAttribute::HighestModSeq(*a),
-                            StatusAttribute::Messages(a) => StatusAttribute::Messages(*a),
-                            StatusAttribute::Recent(a) => StatusAttribute::Recent(*a),
-                            StatusAttribute::UidNext(a) => StatusAttribute::UidNext(*a),
-                            StatusAttribute::UidValidity(a) => StatusAttribute::UidValidity(*a),
-                            StatusAttribute::Unseen(a) => StatusAttribute::Unseen(*a),
-                            _ => unimplemented!(),
-                        })
+                        .map(|s| s.clone())
                         .collect(),
                 })
                 .await
