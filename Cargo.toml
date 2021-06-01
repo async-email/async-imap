@@ -22,7 +22,7 @@ is-it-maintained-open-issues = { repository = "async-email/async-imap" }
 default = []
 
 [dependencies]
-imap-proto = "0.14.2"
+imap-proto = "0.14.3"
 nom = "6.0"
 base64 = "0.13"
 chrono = "0.4"
