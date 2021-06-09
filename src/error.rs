@@ -38,6 +38,11 @@ pub enum Error {
     /// Error appending an e-mail.
     #[error("could not append mail to mailbox")]
     Append,
+    #[error("socks5 error")]
+    Socks5Error(#[from] fast_socks5::SocksError),
+
+    #[error("timeout: {0}")]
+    Timeout(#[from] async_std::future::TimeoutError),
 }
 
 /// An error occured while trying to parse a server response.

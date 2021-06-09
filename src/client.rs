@@ -3,9 +3,11 @@ use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::str;
+use std::time::Duration;
 
 use async_native_tls::{TlsConnector, TlsStream};
 use async_std::channel;
+use async_std::future;
 use async_std::io::{self, Read, Write};
 use async_std::net::{TcpStream, ToSocketAddrs};
 use async_std::prelude::*;
@@ -17,6 +19,8 @@ use super::parse::*;
 use super::types::*;
 use crate::extensions;
 use crate::imap_stream::ImapStream;
+
+use fast_socks5::client::{Config, Socks5Stream};
 
 macro_rules! quote {
     ($x:expr) => {
@@ -127,6 +131,45 @@ pub async fn connect<A: ToSocketAddrs, S: AsRef<str>>(
     let ssl_stream = ssl_connector.connect(domain.as_ref(), stream).await?;
 
     let mut client = Client::new(ssl_stream);
+    let _greeting = match client.read_response().await {
+        Some(greeting) => greeting,
+        None => {
+            return Err(Error::Bad(
+                "could not read server Greeting after connect".into(),
+            ));
+        }
+    };
+
+    Ok(client)
+}
+
+/// Connect to a server using socks5 proxy.
+///
+///
+/// # Examples
+///
+/// ```no_run
+/// # fn main() -> async_imap::error::Result<()> {
+/// # async_std::task::block_on(async {
+///
+/// let tls = async_native_tls::TlsConnector::new();
+/// let client = async_imap::connect_with_socks5("imap.example.org", 993, "127.0.0.1", 9150).await?;
+///
+/// # Ok(())
+/// # }) }
+/// ```
+pub async fn connect_with_socks5(
+    host: String,
+    port: u16,
+    socks5_host: String,
+    socks5_port: u16
+) -> Result<Client<Socks5Stream<TcpStream>>> {
+    let socks5_stream = future::timeout(
+        Duration::from_millis(5000), 
+        Socks5Stream::connect(format!("{}:{}", &socks5_host, socks5_port), host, port, Config::default())
+    ).await??;
+
+    let mut client = Client::new(socks5_stream);
     let _greeting = match client.read_response().await {
         Some(greeting) => greeting,
         None => {

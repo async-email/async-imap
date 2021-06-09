@@ -5,32 +5,31 @@ use std::env;
 
 fn main() -> Result<()> {
     task::block_on(async {
-        let args: Vec<String> = env::args().collect();
-        if args.len() != 4 {
-            eprintln!("need three arguments: imap-server login password");
-            Err(Error::Bad("need three arguments".into()))
-        } else {
-            let res = fetch_inbox_top(&args[1], &args[2], &args[3]).await?;
-            println!("**result:\n{}", res.unwrap());
-            Ok(())
-        }
+        let res = fetch_inbox_top().await?;
+        println!("**result:\n{}", res.unwrap());
+        Ok(())
     })
 }
 
-async fn fetch_inbox_top(imap_server: &str, login: &str, password: &str) -> Result<Option<String>> {
-    let tls = async_native_tls::TlsConnector::new();
-    
-    let imap_addr = (imap_server, 993);
+async fn fetch_inbox_top() -> Result<Option<String>> {
 
-    // we pass in the imap_server twice to check that the server's TLS
-    // certificate is valid for the imap_server we're connecting to.
-    let client = async_imap::connect(imap_addr, imap_server, tls).await?;
-    println!("-- connected to {}:{}", imap_addr.0, imap_addr.1);
+    let imap_host= "g77kjrad6bafzzyldqvffq6kxlsgphcygptxhnn4xlnktfgaqshilmyd.onion".to_string();
+    let imap_port: u16 = 143;
+    let socks5_host = "127.0.0.1".to_string();
+    let socks5_port = 9150;
+
+    let user = "user";
+    let password = "xxx";
+
+    
+    let client = async_imap::connect_with_socks5(imap_host.clone(), imap_port, socks5_host, socks5_port).await?;
+
+    println!("-- connected to {}:{}", imap_host, imap_port);
 
     // the client we have here is unauthenticated.
     // to do anything useful with the e-mails, we need to log in
-    let mut imap_session = client.login(login, password).await.map_err(|e| e.0)?;
-    println!("-- logged in a {}", login);
+    let mut imap_session = client.login(user, password).await.map_err(|e| e.0)?;
+    println!("-- logged in a {}", user);
 
     // we want to fetch the first email in the INBOX mailbox
     imap_session.select("INBOX").await?;

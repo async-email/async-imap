@@ -36,6 +36,7 @@ byte-pool = "0.2.2"
 lazy_static = "1.4.0"
 log = "0.4.8"
 thiserror = "1.0.9"
+fast-socks5 = "0.4.2"
 
 [dev-dependencies]
 lettre_email = "0.9"
