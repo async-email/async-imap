@@ -90,8 +90,11 @@ impl Name {
                 delimiter,
                 name,
             }) => InnerName {
-                attributes: flags.iter().map(|s| NameAttribute::from(*s)).collect(),
-                delimiter: *delimiter,
+                attributes: flags
+                    .iter()
+                    .map(|s| NameAttribute::from(s.as_ref()))
+                    .collect(),
+                delimiter: delimiter.as_deref(),
                 name,
             },
             _ => panic!("cannot construct from non mailbox data"),

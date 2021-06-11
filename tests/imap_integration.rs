@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::time::Duration;
 
 use async_imap::Session;
@@ -171,17 +172,17 @@ fn inbox() {
         assert_ne!(fetch.uid, None);
         assert_eq!(fetch.size, Some(21));
         let e = fetch.envelope().unwrap();
-        assert_eq!(e.subject, Some(&b"My first e-mail"[..]));
+        assert_eq!(e.subject, Some(Cow::Borrowed(&b"My first e-mail"[..])));
         assert_ne!(e.from, None);
         assert_eq!(e.from.as_ref().unwrap().len(), 1);
         let from = &e.from.as_ref().unwrap()[0];
-        assert_eq!(from.mailbox, Some(&b"sender"[..]));
-        assert_eq!(from.host, Some(&b"localhost"[..]));
+        assert_eq!(from.mailbox, Some(Cow::Borrowed(&b"sender"[..])));
+        assert_eq!(from.host, Some(Cow::Borrowed(&b"localhost"[..])));
         assert_ne!(e.to, None);
         assert_eq!(e.to.as_ref().unwrap().len(), 1);
         let to = &e.to.as_ref().unwrap()[0];
-        assert_eq!(to.mailbox, Some(&b"inbox"[..]));
-        assert_eq!(to.host, Some(&b"localhost"[..]));
+        assert_eq!(to.mailbox, Some(Cow::Borrowed(&b"inbox"[..])));
+        assert_eq!(to.host, Some(Cow::Borrowed(&b"localhost"[..])));
         let date_opt = fetch.internal_date();
         assert!(date_opt.is_some());
 
@@ -247,7 +248,7 @@ fn inbox_uid() {
         let fetch = &fetch[0];
         assert_eq!(fetch.uid, Some(uid));
         let e = fetch.envelope().unwrap();
-        assert_eq!(e.subject, Some(&b"My first e-mail"[..]));
+        assert_eq!(e.subject, Some(Cow::Borrowed(&b"My first e-mail"[..])));
         let date_opt = fetch.internal_date();
         assert!(date_opt.is_some());
 

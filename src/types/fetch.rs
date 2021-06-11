@@ -63,7 +63,7 @@ impl Fetch {
                 .iter()
                 .filter_map(|attr| match attr {
                     AttributeValue::Flags(raw_flags) => {
-                        Some(raw_flags.iter().map(|s| Flag::from(*s)))
+                        Some(raw_flags.iter().map(|s| Flag::from(s.as_ref())))
                     }
                     _ => None,
                 })
@@ -85,7 +85,7 @@ impl Fetch {
                         data: Some(hdr),
                         ..
                     }
-                    | AttributeValue::Rfc822Header(Some(hdr)) => Some(*hdr),
+                    | AttributeValue::Rfc822Header(Some(hdr)) => Some(hdr.as_ref()),
                     _ => None,
                 })
                 .next()
@@ -107,7 +107,7 @@ impl Fetch {
                         data: Some(body),
                         ..
                     }
-                    | AttributeValue::Rfc822(Some(body)) => Some(*body),
+                    | AttributeValue::Rfc822(Some(body)) => Some(body.as_ref()),
                     _ => None,
                 })
                 .next()
@@ -130,7 +130,7 @@ impl Fetch {
                         data: Some(body),
                         ..
                     }
-                    | AttributeValue::Rfc822Text(Some(body)) => Some(*body),
+                    | AttributeValue::Rfc822Text(Some(body)) => Some(body.as_ref()),
                     _ => None,
                 })
                 .next()
@@ -173,7 +173,7 @@ impl Fetch {
                         section: Some(sp),
                         data: Some(data),
                         ..
-                    } if sp == path => Some(*data),
+                    } if sp == path => Some(data.as_ref()),
                     _ => None,
                 })
                 .next()
@@ -191,7 +191,7 @@ impl Fetch {
             attrs
                 .iter()
                 .filter_map(|av| match av {
-                    AttributeValue::InternalDate(date_time) => Some(*date_time),
+                    AttributeValue::InternalDate(date_time) => Some(date_time.as_ref()),
                     _ => None,
                 })
                 .next()

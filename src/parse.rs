@@ -240,6 +240,8 @@ pub(crate) async fn parse_mailbox<T: Stream<Item = io::Result<ResponseData>> + U
                 MailboxDatum::MetadataSolicited { .. } => {}
                 MailboxDatum::MetadataUnsolicited { .. } => {}
                 MailboxDatum::Search { .. } => {}
+                MailboxDatum::Sort { .. } => {}
+                _ => {}
             },
             _ => {
                 handle_unilateral(resp, unsolicited.clone()).await;
@@ -293,19 +295,8 @@ pub(crate) async fn handle_unilateral(
         Response::MailboxData(MailboxDatum::Status { mailbox, status }) => {
             unsolicited
                 .send(UnsolicitedResponse::Status {
-                    mailbox: (*mailbox).into(),
-                    attributes: status
-                        .iter()
-                        .map(|s| match s {
-                            // Fake clone
-                            StatusAttribute::HighestModSeq(a) => StatusAttribute::HighestModSeq(*a),
-                            StatusAttribute::Messages(a) => StatusAttribute::Messages(*a),
-                            StatusAttribute::Recent(a) => StatusAttribute::Recent(*a),
-                            StatusAttribute::UidNext(a) => StatusAttribute::UidNext(*a),
-                            StatusAttribute::UidValidity(a) => StatusAttribute::UidValidity(*a),
-                            StatusAttribute::Unseen(a) => StatusAttribute::Unseen(*a),
-                        })
-                        .collect(),
+                    mailbox: (mailbox.as_ref()).into(),
+                    attributes: status.iter().cloned().collect(),
                 })
                 .await
                 .expect("Channel closed unexpectedly");

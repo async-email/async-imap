@@ -20,8 +20,8 @@ impl From<&CapabilityRef<'_>> for Capability {
     fn from(c: &CapabilityRef<'_>) -> Self {
         match c {
             CapabilityRef::Imap4rev1 => Capability::Imap4rev1,
-            CapabilityRef::Auth(s) => Capability::Auth((*s).into()),
-            CapabilityRef::Atom(s) => Capability::Atom((*s).into()),
+            CapabilityRef::Auth(s) => Capability::Auth(s.clone().into_owned()),
+            CapabilityRef::Atom(s) => Capability::Atom(s.clone().into_owned()),
         }
     }
 }

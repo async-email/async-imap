@@ -318,7 +318,7 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Client<T> {
                     Response::Continue { information, .. } => {
                         let challenge = if let Some(text) = information {
                             ok_or_unauth_client_err!(
-                                base64::decode(text).map_err(|e| Error::Parse(
+                                base64::decode(text.as_ref()).map_err(|e| Error::Parse(
                                     ParseError::Authentication((*text).to_string(), Some(e))
                                 )),
                                 self
@@ -1347,7 +1347,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Connection<T> {
                 tag,
             } = response.parsed()
             {
-                self.check_status_ok(status, code.as_ref(), *information)?;
+                self.check_status_ok(status, code.as_ref(), information.as_deref())?;
 
                 if tag == id {
                     return Ok(());
@@ -1412,6 +1412,7 @@ mod tests {
     use super::super::error::Result;
     use super::super::mock_stream::MockStream;
     use super::*;
+    use std::borrow::Cow;
 
     use async_std::sync::{Arc, Mutex};
     use imap_proto::Status;
@@ -1462,7 +1463,7 @@ mod tests {
             &Response::Data {
                 status: Status::Ok,
                 code: None,
-                information: Some("Dovecot ready."),
+                information: Some(Cow::Borrowed("Dovecot ready.")),
             }
         );
     }
