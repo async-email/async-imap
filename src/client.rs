@@ -143,6 +143,7 @@ pub async fn connect<A: ToSocketAddrs, S: AsRef<str>>(
     Ok(client)
 }
 
+/*
 /// Connect to a server using socks5 proxy.
 ///
 ///
@@ -180,7 +181,7 @@ pub async fn connect_with_socks5(
     };
 
     Ok(client)
-}
+}*/
 
 impl<T: Read + Write + Unpin + fmt::Debug + Send> Client<T> {
     /// This will upgrade an IMAP client from using a regular TCP connection to use TLS.
