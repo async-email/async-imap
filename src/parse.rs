@@ -296,7 +296,7 @@ pub(crate) async fn handle_unilateral(
             unsolicited
                 .send(UnsolicitedResponse::Status {
                     mailbox: (mailbox.as_ref()).into(),
-                    attributes: status.iter().cloned().collect(),
+                    attributes: status.to_vec(),
                 })
                 .await
                 .expect("Channel closed unexpectedly");
