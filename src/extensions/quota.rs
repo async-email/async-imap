@@ -6,11 +6,14 @@ use async_std::prelude::*;
 use async_std::stream::Stream;
 use imap_proto::{self, Quota, QuotaRoot, RequestId, Response};
 
-use crate::types::ResponseData;
 use crate::types::*;
 use crate::{
     error::Result,
     parse::{filter_sync, handle_unilateral},
+};
+use crate::{
+    error::{Error, ParseError},
+    types::ResponseData,
 };
 
 pub(crate) async fn parse_get_quota<T: Stream<Item = io::Result<ResponseData>> + Unpin>(
@@ -18,6 +21,7 @@ pub(crate) async fn parse_get_quota<T: Stream<Item = io::Result<ResponseData>> +
     unsolicited: channel::Sender<UnsolicitedResponse>,
     command_tag: RequestId,
 ) -> Result<Quota<'_>> {
+    let mut quota = None;
     while let Some(resp) = stream
         .take_while(|res| filter_sync(res, &command_tag))
         .next()
@@ -25,16 +29,19 @@ pub(crate) async fn parse_get_quota<T: Stream<Item = io::Result<ResponseData>> +
     {
         let resp = resp?;
         match resp.parsed() {
-            Response::Quota(q) => {
-                return Ok(q.clone().into_owned());
-            }
+            Response::Quota(q) => quota = Some(q.clone().into_owned()),
             _ => {
                 handle_unilateral(resp, unsolicited.clone()).await;
             }
         }
     }
 
-    unreachable!(); // TODO, make this better
+    match quota {
+        Some(q) => Ok(q),
+        None => Err(Error::Parse(ParseError::ExpectedResponseNotFound(
+            "Quota, no quota response found".to_string(),
+        ))),
+    }
 }
 
 pub(crate) async fn parse_get_quota_root<T: Stream<Item = io::Result<ResponseData>> + Unpin>(

@@ -1,8 +1,8 @@
+use std::collections::HashSet;
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::str;
-use std::{borrow::Cow, collections::HashSet};
 
 use async_native_tls::{TlsConnector, TlsStream};
 use async_std::channel;
@@ -1247,7 +1247,7 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Session<T> {
     }
 
     /// The [`GETQUOTA` command](https://tools.ietf.org/html/rfc2087#section-4.2)
-    pub async fn get_quota(&mut self, quota_root: Cow<'_, str>) -> Result<Quota<'_>> {
+    pub async fn get_quota(&mut self, quota_root: &str) -> Result<Quota<'_>> {
         let id = self
             .run_command(format!("GETQUOTA {}", quote!(quota_root)))
             .await?;
@@ -1263,7 +1263,7 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Session<T> {
     /// The [`GETQUOTAROOT` command](https://tools.ietf.org/html/rfc2087#section-4.3)
     pub async fn get_quota_root(
         &mut self,
-        mailbox_name: Cow<'_, str>,
+        mailbox_name: &str,
     ) -> Result<(Vec<QuotaRoot<'_>>, Vec<Quota<'_>>)> {
         let id = self
             .run_command(format!("GETQUOTAROOT {}", quote!(mailbox_name)))

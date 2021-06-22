@@ -55,6 +55,9 @@ pub enum ParseError {
     /// The client received data that was not UTF-8 encoded.
     #[error("unable to parse data ({0:?}) as UTF-8 text: {1:?}")]
     DataNotUtf8(Vec<u8>, #[source] Utf8Error),
+    /// The expected response for X was not found
+    #[error("expected response not found for: {0}")]
+    ExpectedResponseNotFound(String),
 }
 
 /// An [invalid character](https://tools.ietf.org/html/rfc3501#section-4.3) was found in an input
