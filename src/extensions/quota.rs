@@ -4,7 +4,7 @@ use async_std::channel;
 use async_std::io;
 use async_std::prelude::*;
 use async_std::stream::Stream;
-use imap_proto::{self, Quota, QuotaRoot, RequestId, Response};
+use imap_proto::{self, RequestId, Response};
 
 use crate::types::*;
 use crate::{
@@ -13,14 +13,14 @@ use crate::{
 };
 use crate::{
     error::{Error, ParseError},
-    types::ResponseData,
+    types::{Quota, QuotaRoot, ResponseData},
 };
 
 pub(crate) async fn parse_get_quota<T: Stream<Item = io::Result<ResponseData>> + Unpin>(
     stream: &mut T,
     unsolicited: channel::Sender<UnsolicitedResponse>,
     command_tag: RequestId,
-) -> Result<Quota<'_>> {
+) -> Result<Quota> {
     let mut quota = None;
     while let Some(resp) = stream
         .take_while(|res| filter_sync(res, &command_tag))
@@ -29,7 +29,7 @@ pub(crate) async fn parse_get_quota<T: Stream<Item = io::Result<ResponseData>> +
     {
         let resp = resp?;
         match resp.parsed() {
-            Response::Quota(q) => quota = Some(q.clone().into_owned()),
+            Response::Quota(q) => quota = Some(q.clone().into()),
             _ => {
                 handle_unilateral(resp, unsolicited.clone()).await;
             }
@@ -48,9 +48,9 @@ pub(crate) async fn parse_get_quota_root<T: Stream<Item = io::Result<ResponseDat
     stream: &mut T,
     unsolicited: channel::Sender<UnsolicitedResponse>,
     command_tag: RequestId,
-) -> Result<(Vec<QuotaRoot<'_>>, Vec<Quota<'_>>)> {
-    let mut roots: Vec<QuotaRoot<'_>> = Vec::new();
-    let mut quotas: Vec<Quota<'_>> = Vec::new();
+) -> Result<(Vec<QuotaRoot>, Vec<Quota>)> {
+    let mut roots: Vec<QuotaRoot> = Vec::new();
+    let mut quotas: Vec<Quota> = Vec::new();
 
     while let Some(resp) = stream
         .take_while(|res| filter_sync(res, &command_tag))
@@ -60,10 +60,10 @@ pub(crate) async fn parse_get_quota_root<T: Stream<Item = io::Result<ResponseDat
         let resp = resp?;
         match resp.parsed() {
             Response::QuotaRoot(qr) => {
-                roots.push(qr.clone().into_owned());
+                roots.push(qr.clone().into());
             }
             Response::Quota(q) => {
-                quotas.push(q.clone().into_owned());
+                quotas.push(q.clone().into());
             }
             _ => {
                 handle_unilateral(resp, unsolicited.clone()).await;

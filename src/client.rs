@@ -10,7 +10,7 @@ use async_std::io::{self, Read, Write};
 use async_std::net::{TcpStream, ToSocketAddrs};
 use async_std::prelude::*;
 use extensions::quota::parse_get_quota_root;
-use imap_proto::{Quota, QuotaRoot, RequestId, Response};
+use imap_proto::{RequestId, Response};
 
 use super::authenticator::Authenticator;
 use super::error::{Error, ParseError, Result, ValidateError};
@@ -1247,7 +1247,7 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Session<T> {
     }
 
     /// The [`GETQUOTA` command](https://tools.ietf.org/html/rfc2087#section-4.2)
-    pub async fn get_quota(&mut self, quota_root: &str) -> Result<Quota<'_>> {
+    pub async fn get_quota(&mut self, quota_root: &str) -> Result<Quota> {
         let id = self
             .run_command(format!("GETQUOTA {}", quote!(quota_root)))
             .await?;
@@ -1264,7 +1264,7 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Session<T> {
     pub async fn get_quota_root(
         &mut self,
         mailbox_name: &str,
-    ) -> Result<(Vec<QuotaRoot<'_>>, Vec<Quota<'_>>)> {
+    ) -> Result<(Vec<QuotaRoot>, Vec<Quota>)> {
         let id = self
             .run_command(format!("GETQUOTAROOT {}", quote!(mailbox_name)))
             .await?;
