@@ -10,6 +10,7 @@ pub enum QuotaResourceName {
     Storage,
     /// Number of messages
     Message,
+    /// A different/custom resource
     Atom(String),
 }
 
@@ -26,6 +27,7 @@ impl<'a> From<QuotaResourceNameRef<'a>> for QuotaResourceName {
 /// 5.1. QUOTA Response (https://tools.ietf.org/html/rfc2087#section-5.1)
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
 pub struct QuotaResource {
+    /// name of the resource
     pub name: QuotaResourceName,
     /// current usage of the resource
     pub usage: u64,
@@ -43,11 +45,19 @@ impl<'a> From<QuotaResourceRef<'a>> for QuotaResource {
     }
 }
 
+impl QuotaResource {
+    /// gets the usage percentage of a QuotaResource
+    pub fn get_usage_percentage(self) -> u64 {
+        self.usage.saturating_mul(100) / self.limit
+    }
+}
+
 /// 5.1. QUOTA Response (https://tools.ietf.org/html/rfc2087#section-5.1)
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
 pub struct Quota {
     /// quota root name
     pub root_name: String,
+    /// quota resources for this quota
     pub resources: Vec<QuotaResource>,
 }
 
