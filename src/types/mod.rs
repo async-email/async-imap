@@ -214,7 +214,7 @@ mod request;
 pub(crate) use self::request::Request;
 
 mod quota;
-pub(crate) use self::quota::*;
+pub use self::quota::*;
 
 /// Responses that the server sends that are not related to the current command.
 /// [RFC 3501](https://tools.ietf.org/html/rfc3501#section-7) states that clients need to be able
