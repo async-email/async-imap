@@ -47,7 +47,7 @@ impl<'a> From<QuotaResourceRef<'a>> for QuotaResource {
 
 impl QuotaResource {
     /// gets the usage percentage of a QuotaResource
-    pub fn get_usage_percentage(self) -> u64 {
+    pub fn get_usage_percentage(&self) -> u64 {
         self.usage.saturating_mul(100) / self.limit
     }
 }
