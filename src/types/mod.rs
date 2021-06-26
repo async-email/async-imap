@@ -213,6 +213,9 @@ pub(crate) use self::response_data::ResponseData;
 mod request;
 pub(crate) use self::request::Request;
 
+mod quota;
+pub use self::quota::*;
+
 /// Responses that the server sends that are not related to the current command.
 /// [RFC 3501](https://tools.ietf.org/html/rfc3501#section-7) states that clients need to be able
 /// to accept any response at any time. These are the ones we've encountered in the wild.

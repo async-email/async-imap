@@ -9,13 +9,14 @@ use async_std::channel;
 use async_std::io::{self, Read, Write};
 use async_std::net::{TcpStream, ToSocketAddrs};
 use async_std::prelude::*;
+use extensions::quota::parse_get_quota_root;
 use imap_proto::{RequestId, Response};
 
 use super::authenticator::Authenticator;
 use super::error::{Error, ParseError, Result, ValidateError};
 use super::parse::*;
 use super::types::*;
-use crate::extensions;
+use crate::extensions::{self, quota::parse_get_quota};
 use crate::imap_stream::ImapStream;
 
 macro_rules! quote {
@@ -1243,6 +1244,37 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Session<T> {
         .await?;
 
         Ok(uids)
+    }
+
+    /// The [`GETQUOTA` command](https://tools.ietf.org/html/rfc2087#section-4.2)
+    pub async fn get_quota(&mut self, quota_root: &str) -> Result<Quota> {
+        let id = self
+            .run_command(format!("GETQUOTA {}", quote!(quota_root)))
+            .await?;
+        let c = parse_get_quota(
+            &mut self.conn.stream,
+            self.unsolicited_responses_tx.clone(),
+            id,
+        )
+        .await?;
+        Ok(c)
+    }
+
+    /// The [`GETQUOTAROOT` command](https://tools.ietf.org/html/rfc2087#section-4.3)
+    pub async fn get_quota_root(
+        &mut self,
+        mailbox_name: &str,
+    ) -> Result<(Vec<QuotaRoot>, Vec<Quota>)> {
+        let id = self
+            .run_command(format!("GETQUOTAROOT {}", quote!(mailbox_name)))
+            .await?;
+        let c = parse_get_quota_root(
+            &mut self.conn.stream,
+            self.unsolicited_responses_tx.clone(),
+            id,
+        )
+        .await?;
+        Ok(c)
     }
 
     // these are only here because they are public interface, the rest is in `Connection`
