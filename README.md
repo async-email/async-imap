@@ -111,7 +111,7 @@ async fn fetch_inbox_top() -> Result<Option<String>> {
 ## Running the test suite
 
 To run the integration tests, you need to have [GreenMail
-running](http://www.icegreen.com/greenmail/#deploy_docker_standalone). The
+running](https://greenmail-mail-test.github.io/greenmail/#deploy_docker_standalone). The
 easiest way to do that is with Docker:
 
 ```console
