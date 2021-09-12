@@ -3,7 +3,7 @@ use std::fmt;
 
 /// Meta-information about an IMAP mailbox, as returned by
 /// [`SELECT`](https://tools.ietf.org/html/rfc3501#section-6.3.1) and friends.
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Default)]
 pub struct Mailbox {
     /// Defined flags in the mailbox.  See the description of the [FLAGS
     /// response](https://tools.ietf.org/html/rfc3501#section-7.2.6) for more detail.
@@ -35,20 +35,6 @@ pub struct Mailbox {
     /// The unique identifier validity value.  See [`Uid`] for more details.  If this is missing,
     /// the server does not support unique identifiers.
     pub uid_validity: Option<u32>,
-}
-
-impl Default for Mailbox {
-    fn default() -> Mailbox {
-        Mailbox {
-            flags: Vec::new(),
-            exists: 0,
-            recent: 0,
-            unseen: None,
-            permanent_flags: Vec::new(),
-            uid_next: None,
-            uid_validity: None,
-        }
-    }
 }
 
 impl fmt::Display for Mailbox {
