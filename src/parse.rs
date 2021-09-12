@@ -165,13 +165,44 @@ pub(crate) async fn parse_mailbox<T: Stream<Item = io::Result<ResponseData>> + U
 ) -> Result<Mailbox> {
     let mut mailbox = Mailbox::default();
 
-    while let Some(resp) = stream
-        .take_while(|res| filter_sync(res, &command_tag))
-        .next()
-        .await
-    {
+    while let Some(resp) = stream.next().await {
         let resp = resp?;
         match resp.parsed() {
+            Response::Done {
+                tag,
+                status,
+                code,
+                information,
+                ..
+            } if tag == &command_tag => {
+                use imap_proto::Status;
+                match status {
+                    Status::Ok => {
+                        break;
+                    }
+                    Status::Bad => {
+                        return Err(Error::Bad(format!(
+                            "code: {:?}, info: {:?}",
+                            code, information
+                        )))
+                    }
+                    Status::No => {
+                        return Err(Error::No(format!(
+                            "code: {:?}, info: {:?}",
+                            code, information
+                        )))
+                    }
+                    _ => {
+                        return Err(Error::Io(io::Error::new(
+                            io::ErrorKind::Other,
+                            format!(
+                                "status: {:?}, code: {:?}, information: {:?}",
+                                status, code, information
+                            ),
+                        )));
+                    }
+                }
+            }
             Response::Data {
                 status,
                 code,
@@ -617,5 +648,20 @@ mod tests {
         assert!(recv.is_empty());
         let ids: HashSet<u32> = ids.iter().cloned().collect();
         assert_eq!(ids, HashSet::<u32>::new());
+    }
+
+    #[async_std::test]
+    async fn parse_mailbox_does_not_exist_error() {
+        let (send, recv) = channel::bounded(10);
+        let responses = input_stream(&[
+            "A0003 NO Mailbox doesn't exist: DeltaChat (0.001 + 0.140 + 0.139 secs).\r\n",
+        ]);
+        let mut stream = async_std::stream::from_iter(responses);
+
+        let id = RequestId("A0003".into());
+        let mailbox = parse_mailbox(&mut stream, send, id).await;
+        assert!(recv.is_empty());
+
+        assert!(matches!(mailbox, Err(Error::No(_))));
     }
 }
