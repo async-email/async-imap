@@ -6,6 +6,7 @@ use crate::types::ResponseData;
 
 /// A name that matches a `LIST` or `LSUB` command.
 #[ouroboros::self_referencing(pub_extras)]
+#[derive(Debug)]
 pub struct Name {
     response: Box<ResponseData>,
     #[borrows(response)]
