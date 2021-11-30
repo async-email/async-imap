@@ -8,13 +8,12 @@ use async_std::sync::Arc;
 use byte_pool::{Block, BytePool};
 use futures::task::{Context, Poll};
 use nom::Needed;
+use once_cell::sync::Lazy;
 
 use crate::types::{Request, ResponseData};
 
-lazy_static::lazy_static! {
-    /// The global buffer pool we use for storing incoming data.
-    pub(crate) static ref POOL: Arc<BytePool> = Arc::new(BytePool::new());
-}
+/// The global buffer pool we use for storing incoming data.
+pub(crate) static POOL: Lazy<Arc<BytePool>> = Lazy::new(|| Arc::new(BytePool::new()));
 
 /// Wraps a stream, and parses incoming data as imap server messages. Writes outgoing data
 /// as imap client messages.
