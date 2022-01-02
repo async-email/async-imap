@@ -28,31 +28,39 @@ pub struct Fetch {
     /// A number expressing the [RFC-2822](https://tools.ietf.org/html/rfc2822) size of the message.
     /// Only present if `RFC822.SIZE` was specified in the query argument to `FETCH`.
     pub size: Option<u32>,
+
+    /// A number expressing the [RFC-7162](https://tools.ietf.org/html/rfc7162) mod-sequence
+    /// of the message.
+    pub modseq: Option<u64>,
 }
 
 impl Fetch {
     pub(crate) fn new(response: ResponseData) -> Self {
-        let (message, uid, size) = if let Response::Fetch(message, attrs) = response.parsed() {
-            let mut uid = None;
-            let mut size = None;
+        let (message, uid, size, modseq) =
+            if let Response::Fetch(message, attrs) = response.parsed() {
+                let mut uid = None;
+                let mut size = None;
+                let mut modseq = None;
 
-            for attr in attrs {
-                match attr {
-                    AttributeValue::Uid(id) => uid = Some(*id),
-                    AttributeValue::Rfc822Size(sz) => size = Some(*sz),
-                    _ => {}
+                for attr in attrs {
+                    match attr {
+                        AttributeValue::Uid(id) => uid = Some(*id),
+                        AttributeValue::Rfc822Size(sz) => size = Some(*sz),
+                        AttributeValue::ModSeq(ms) => modseq = Some(*ms),
+                        _ => {}
+                    }
                 }
-            }
-            (*message, uid, size)
-        } else {
-            unreachable!()
-        };
+                (*message, uid, size, modseq)
+            } else {
+                unreachable!()
+            };
 
         Fetch {
             response,
             message,
             uid,
             size,
+            modseq,
         }
     }
 
