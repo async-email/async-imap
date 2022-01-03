@@ -35,6 +35,9 @@ pub struct Mailbox {
     /// The unique identifier validity value.  See [`Uid`] for more details.  If this is missing,
     /// the server does not support unique identifiers.
     pub uid_validity: Option<u32>,
+
+    /// Highest mailbox mod-sequence as defined in [RFC-7162](https://tools.ietf.org/html/rfc7162).
+    pub highest_modseq: Option<u64>,
 }
 
 impl fmt::Display for Mailbox {

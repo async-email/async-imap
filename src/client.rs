@@ -1700,6 +1700,7 @@ mod tests {
             permanent_flags: vec![],
             uid_next: Some(2),
             uid_validity: Some(1257842737),
+            highest_modseq: None,
         };
         let mailbox_name = "INBOX";
         let command = format!("A0001 EXAMINE {}\r\n", quote!(mailbox_name));
@@ -1723,6 +1724,7 @@ mod tests {
             * OK [UNSEEN 1] First unseen.\r\n\
             * OK [UIDVALIDITY 1257842737] UIDs valid\r\n\
             * OK [UIDNEXT 2] Predicted next UID\r\n\
+            * OK [HIGHESTMODSEQ 90060115205545359] Highest mailbox modsequence\r\n\
             A0001 OK [READ-ONLY] Select completed.\r\n"
             .to_vec();
         let expected_mailbox = Mailbox {
@@ -1746,6 +1748,7 @@ mod tests {
             ],
             uid_next: Some(2),
             uid_validity: Some(1257842737),
+            highest_modseq: Some(90060115205545359),
         };
         let mailbox_name = "INBOX";
         let command = format!("A0001 SELECT {}\r\n", quote!(mailbox_name));

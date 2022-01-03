@@ -220,6 +220,9 @@ pub(crate) async fn parse_mailbox<T: Stream<Item = io::Result<ResponseData>> + U
                             Some(ResponseCode::UidNext(unext)) => {
                                 mailbox.uid_next = Some(*unext);
                             }
+                            Some(ResponseCode::HighestModSeq(highest_modseq)) => {
+                                mailbox.highest_modseq = Some(*highest_modseq);
+                            }
                             Some(ResponseCode::Unseen(n)) => {
                                 mailbox.unseen = Some(*n);
                             }
