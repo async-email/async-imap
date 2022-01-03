@@ -400,6 +400,25 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Session<T> {
         Ok(mbox)
     }
 
+    /// Selects a mailbox with `(CONDSTORE)` parameter as defined in [RFC
+    /// 7162](https://www.rfc-editor.org/rfc/rfc7162.html#section-3.1.8).
+    pub async fn select_condstore<S: AsRef<str>>(&mut self, mailbox_name: S) -> Result<Mailbox> {
+        let id = self
+            .run_command(&format!(
+                "SELECT {} (CONDSTORE)",
+                validate_str(mailbox_name.as_ref())?
+            ))
+            .await?;
+        let mbox = parse_mailbox(
+            &mut self.conn.stream,
+            self.unsolicited_responses_tx.clone(),
+            id,
+        )
+        .await?;
+
+        Ok(mbox)
+    }
+
     /// The `EXAMINE` command is identical to [`Session::select`] and returns the same output;
     /// however, the selected mailbox is identified as read-only. No changes to the permanent state
     /// of the mailbox, including per-user state, will happen in a mailbox opened with `examine`;
