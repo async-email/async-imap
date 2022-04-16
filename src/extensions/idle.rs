@@ -9,6 +9,7 @@ use async_std::prelude::*;
 use async_std::stream::Stream;
 use futures::task::{Context, Poll};
 use imap_proto::{RequestId, Response, Status};
+use stop_token::prelude::*;
 
 use crate::client::Session;
 use crate::error::Result;
@@ -111,10 +112,10 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Handle<T> {
 
         let interrupt = stop_token::StopSource::new();
         let raw_stream = IdleStream::new(self);
-        let mut interruptible_stream = interrupt.stop_token().stop_stream(raw_stream);
+        let mut interruptible_stream = raw_stream.timeout_at(interrupt.token());
 
         let fut = async move {
-            while let Some(resp) = interruptible_stream.next().await {
+            while let Some(Ok(resp)) = interruptible_stream.next().await {
                 let resp = resp?;
                 match resp.parsed() {
                     Response::Data { status, .. } if status == &Status::Ok => {
