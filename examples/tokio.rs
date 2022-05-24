@@ -4,7 +4,7 @@ use std::env;
 use tokio::runtime::Runtime;
 
 fn main() -> Result<()> {
-    let mut rt = Runtime::new().expect("unable to create runtime");
+    let rt = Runtime::new().expect("unable to create runtime");
 
     rt.block_on(async {
         let args: Vec<String> = env::args().collect();

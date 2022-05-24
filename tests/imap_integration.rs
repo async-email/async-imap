@@ -110,7 +110,7 @@ fn make_email(to: &str) -> async_smtp::SendableEmail {
             vec![to.parse().unwrap()],
         )
         .unwrap(),
-        message_id.to_string(),
+        message_id,
         format!("To: <{}>\r\nFrom: <sender@localhost>\r\nMessage-ID: <{}.msg@localhost>\r\nSubject: My first e-mail\r\n\r\nHello world from SMTP", to, message_id),
     )
 }
