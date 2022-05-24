@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 
 use async_std::channel;
-use async_std::io;
-use async_std::prelude::*;
-use async_std::stream::Stream;
+use futures::io;
+use futures::prelude::*;
+use futures::stream::Stream;
 use imap_proto::{self, MailboxDatum, RequestId, Response};
 
 use crate::error::{Error, Result};
@@ -41,7 +41,10 @@ pub(crate) fn parse_names<T: Stream<Item = io::Result<ResponseData>> + Unpin + S
     )
 }
 
-fn filter(res: &io::Result<ResponseData>, command_tag: &RequestId) -> impl Future<Output = bool> {
+pub(crate) fn filter(
+    res: &io::Result<ResponseData>,
+    command_tag: &RequestId,
+) -> impl Future<Output = bool> {
     let val = filter_sync(res, command_tag);
     futures::future::ready(val)
 }
@@ -121,7 +124,7 @@ pub(crate) async fn parse_capabilities<T: Stream<Item = io::Result<ResponseData>
     let mut caps: HashSet<Capability> = HashSet::new();
 
     while let Some(resp) = stream
-        .take_while(|res| filter_sync(res, &command_tag))
+        .take_while(|res| filter(res, &command_tag))
         .next()
         .await
     {
@@ -147,7 +150,7 @@ pub(crate) async fn parse_noop<T: Stream<Item = io::Result<ResponseData>> + Unpi
     command_tag: RequestId,
 ) -> Result<()> {
     while let Some(resp) = stream
-        .take_while(|res| filter_sync(res, &command_tag))
+        .take_while(|res| filter(res, &command_tag))
         .next()
         .await
     {
@@ -294,7 +297,7 @@ pub(crate) async fn parse_ids<T: Stream<Item = io::Result<ResponseData>> + Unpin
     let mut ids: HashSet<u32> = HashSet::new();
 
     while let Some(resp) = stream
-        .take_while(|res| filter_sync(res, &command_tag))
+        .take_while(|res| filter(res, &command_tag))
         .next()
         .await
     {
@@ -439,7 +442,7 @@ mod tests {
 
         let id = RequestId("A0001".into());
         let names: Vec<_> = parse_names(&mut stream, send, id)
-            .collect::<Result<Vec<Name>>>()
+            .try_collect::<Vec<Name>>()
             .await
             .unwrap();
         assert!(recv.is_empty());
@@ -460,7 +463,7 @@ mod tests {
         let id = RequestId("a".into());
 
         let fetches = parse_fetches(&mut stream, send, id)
-            .collect::<Result<Vec<_>>>()
+            .try_collect::<Vec<_>>()
             .await
             .unwrap();
         assert!(recv.is_empty());
@@ -478,7 +481,7 @@ mod tests {
         let id = RequestId("a".into());
 
         let fetches = parse_fetches(&mut stream, send, id)
-            .collect::<Result<Vec<_>>>()
+            .try_collect::<Vec<_>>()
             .await
             .unwrap();
         assert!(recv.is_empty());
@@ -505,7 +508,7 @@ mod tests {
         let id = RequestId("a".into());
 
         let fetches = parse_fetches(&mut stream, send, id)
-            .collect::<Result<Vec<_>>>()
+            .try_collect::<Vec<_>>()
             .await
             .unwrap();
         assert_eq!(recv.recv().await.unwrap(), UnsolicitedResponse::Recent(1));
@@ -526,7 +529,7 @@ mod tests {
 
         let id = RequestId("A0001".into());
         let names = parse_names(&mut stream, send, id)
-            .collect::<Result<Vec<_>>>()
+            .try_collect::<Vec<_>>()
             .await
             .unwrap();
 

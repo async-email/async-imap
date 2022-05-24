@@ -1,7 +1,7 @@
 use std::cmp::min;
 use std::pin::Pin;
 
-use async_std::io::{Error, ErrorKind, Read, Result, Write};
+use futures::io::{AsyncRead as Read, AsyncWrite as Write, Error, ErrorKind, Result};
 use futures::task::{Context, Poll};
 
 #[derive(Default, Clone, Debug, Eq, PartialEq, Hash)]

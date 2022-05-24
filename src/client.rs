@@ -6,10 +6,10 @@ use std::str;
 
 use async_native_tls::{TlsConnector, TlsStream};
 use async_std::channel;
-use async_std::io::{self, Read, Write};
 use async_std::net::{TcpStream, ToSocketAddrs};
-use async_std::prelude::*;
 use extensions::quota::parse_get_quota_root;
+use futures::io::{self, AsyncRead as Read, AsyncWrite as Write};
+use futures::prelude::*;
 use imap_proto::{RequestId, Response};
 
 use super::authenticator::Authenticator;

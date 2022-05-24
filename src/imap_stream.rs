@@ -1,12 +1,12 @@
 use std::fmt;
 use std::pin::Pin;
+use std::sync::Arc;
 
-use async_std::io::{self, Read, Write};
-use async_std::prelude::*;
-use async_std::stream::Stream;
-use async_std::sync::Arc;
 use byte_pool::{Block, BytePool};
+use futures::io::{self, AsyncRead as Read, AsyncWrite as Write};
+use futures::stream::Stream;
 use futures::task::{Context, Poll};
+use futures::AsyncWriteExt;
 use nom::Needed;
 use once_cell::sync::Lazy;
 

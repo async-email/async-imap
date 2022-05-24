@@ -1,15 +1,14 @@
 //! Adds support for the GETQUOTA and GETQUOTAROOT commands specificed in [RFC2087](https://tools.ietf.org/html/rfc2087).
 
 use async_std::channel;
-use async_std::io;
-use async_std::prelude::*;
-use async_std::stream::Stream;
+use futures::io;
+use futures::prelude::*;
 use imap_proto::{self, RequestId, Response};
 
 use crate::types::*;
 use crate::{
     error::Result,
-    parse::{filter_sync, handle_unilateral},
+    parse::{filter, handle_unilateral},
 };
 use crate::{
     error::{Error, ParseError},
@@ -23,7 +22,7 @@ pub(crate) async fn parse_get_quota<T: Stream<Item = io::Result<ResponseData>> +
 ) -> Result<Quota> {
     let mut quota = None;
     while let Some(resp) = stream
-        .take_while(|res| filter_sync(res, &command_tag))
+        .take_while(|res| filter(res, &command_tag))
         .next()
         .await
     {
@@ -53,7 +52,7 @@ pub(crate) async fn parse_get_quota_root<T: Stream<Item = io::Result<ResponseDat
     let mut quotas: Vec<Quota> = Vec::new();
 
     while let Some(resp) = stream
-        .take_while(|res| filter_sync(res, &command_tag))
+        .take_while(|res| filter(res, &command_tag))
         .next()
         .await
     {

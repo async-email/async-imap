@@ -4,9 +4,8 @@ use std::fmt;
 use std::pin::Pin;
 use std::time::Duration;
 
-use async_std::io::{self, Read, Write};
-use async_std::prelude::*;
-use async_std::stream::Stream;
+use futures::io::{self, AsyncRead as Read, AsyncWrite as Write};
+use futures::prelude::*;
 use futures::task::{Context, Poll};
 use imap_proto::{RequestId, Response, Status};
 use stop_token::prelude::*;
