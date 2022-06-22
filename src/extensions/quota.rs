@@ -1,6 +1,6 @@
 //! Adds support for the GETQUOTA and GETQUOTAROOT commands specificed in [RFC2087](https://tools.ietf.org/html/rfc2087).
 
-use async_std::channel;
+use async_channel as channel;
 use futures::io;
 use futures::prelude::*;
 use imap_proto::{self, RequestId, Response};

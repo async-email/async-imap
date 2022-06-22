@@ -62,6 +62,11 @@
 #![warn(missing_docs)]
 #![deny(rust_2018_idioms, unsafe_code)]
 
+#[cfg(not(any(feature = "runtime-tokio", feature = "runtime-async-std")))]
+compile_error!("one of 'runtime-async-std' or 'runtime-tokio' features must be enabled");
+
+#[cfg(all(feature = "runtime-tokio", feature = "runtime-async-std"))]
+compile_error!("only one of 'runtime-async-std' or 'runtime-tokio' features must be enabled");
 #[macro_use]
 extern crate pin_utils;
 
