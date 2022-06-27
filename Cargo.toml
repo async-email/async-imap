@@ -19,38 +19,33 @@ is-it-maintained-issue-resolution = { repository = "async-email/async-imap" }
 is-it-maintained-open-issues = { repository = "async-email/async-imap" }
 
 [features]
-default = []
+default = ["runtime-async-std"]
+
+runtime-async-std = ["async-std", "async-native-tls/runtime-async-std"]
+runtime-tokio = ["tokio", "async-native-tls/runtime-tokio"]
 
 [dependencies]
-imap-proto = "0.14.3"
-nom = "6.0"
+imap-proto = "0.16.1"
+nom = "7.0"
 base64 = "0.13"
 chrono = "0.4"
-async-native-tls = { version = "0.3.3" }
-async-std = { version = "1.8.0", default-features = false, features = ["std"] }
 pin-utils = "0.1.0-alpha.4"
 futures = "0.3.15"
-ouroboros = "0.9"
+ouroboros = "0.15"
 stop-token = "0.7"
 byte-pool = "0.2.2"
 once_cell = "1.8.0"
 log = "0.4.8"
 thiserror = "1.0.9"
+async-channel = "1.6.1"
+
+async-native-tls = { version = "0.4", default-features = false }
+async-std = { version = "1.8.0", default-features = false, features = ["std"], optional = true }
+tokio = { version = "1", features = ["net", "sync", "time"], optional = true }
+
 
 [dev-dependencies]
-lettre_email = "0.9"
-pretty_assertions = "0.6.1"
-async-smtp = { version = "0.3.0" }
-async-std = { version = "1.8.0", default-features = false, features = ["std", "attributes"] }
+pretty_assertions = "1.2"
+async-std = { version = "1.8.0", features = ["std", "attributes"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
-[[example]]
-name = "basic"
-required-features = ["default"]
-
-[[example]]
-name = "gmail_oauth2"
-required-features = ["default"]
-
-[[test]]
-name = "imap_integration"
-required-features = ["default"]

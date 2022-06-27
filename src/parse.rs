@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 
-use async_std::channel;
-use async_std::io;
-use async_std::prelude::*;
-use async_std::stream::Stream;
+use async_channel as channel;
+use futures::io;
+use futures::prelude::*;
+use futures::stream::Stream;
 use imap_proto::{self, MailboxDatum, RequestId, Response};
 
 use crate::error::{Error, Result};
@@ -41,7 +41,10 @@ pub(crate) fn parse_names<T: Stream<Item = io::Result<ResponseData>> + Unpin + S
     )
 }
 
-fn filter(res: &io::Result<ResponseData>, command_tag: &RequestId) -> impl Future<Output = bool> {
+pub(crate) fn filter(
+    res: &io::Result<ResponseData>,
+    command_tag: &RequestId,
+) -> impl Future<Output = bool> {
     let val = filter_sync(res, command_tag);
     futures::future::ready(val)
 }
@@ -121,7 +124,7 @@ pub(crate) async fn parse_capabilities<T: Stream<Item = io::Result<ResponseData>
     let mut caps: HashSet<Capability> = HashSet::new();
 
     while let Some(resp) = stream
-        .take_while(|res| filter_sync(res, &command_tag))
+        .take_while(|res| filter(res, &command_tag))
         .next()
         .await
     {
@@ -147,7 +150,7 @@ pub(crate) async fn parse_noop<T: Stream<Item = io::Result<ResponseData>> + Unpi
     command_tag: RequestId,
 ) -> Result<()> {
     while let Some(resp) = stream
-        .take_while(|res| filter_sync(res, &command_tag))
+        .take_while(|res| filter(res, &command_tag))
         .next()
         .await
     {
@@ -294,7 +297,7 @@ pub(crate) async fn parse_ids<T: Stream<Item = io::Result<ResponseData>> + Unpin
     let mut ids: HashSet<u32> = HashSet::new();
 
     while let Some(resp) = stream
-        .take_while(|res| filter_sync(res, &command_tag))
+        .take_while(|res| filter(res, &command_tag))
         .next()
         .await
     {
@@ -365,6 +368,7 @@ pub(crate) async fn handle_unilateral(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_channel::bounded;
 
     fn input_stream(data: &[&str]) -> Vec<io::Result<ResponseData>> {
         data.iter()
@@ -380,14 +384,15 @@ mod tests {
             .collect()
     }
 
-    #[async_std::test]
+    #[cfg_attr(feature = "runtime-tokio", tokio::test)]
+    #[cfg_attr(feature = "runtime-async-std", async_std::test)]
     async fn parse_capability_test() {
         let expected_capabilities = &["IMAP4rev1", "STARTTLS", "AUTH=GSSAPI", "LOGINDISABLED"];
         let responses =
             input_stream(&["* CAPABILITY IMAP4rev1 STARTTLS AUTH=GSSAPI LOGINDISABLED\r\n"]);
 
         let mut stream = async_std::stream::from_iter(responses);
-        let (send, recv) = channel::bounded(10);
+        let (send, recv) = bounded(10);
         let id = RequestId("A0001".into());
         let capabilities = parse_capabilities(&mut stream, send, id).await.unwrap();
         // shouldn't be any unexpected responses parsed
@@ -398,14 +403,15 @@ mod tests {
         }
     }
 
-    #[async_std::test]
+    #[cfg_attr(feature = "runtime-tokio", tokio::test)]
+    #[cfg_attr(feature = "runtime-async-std", async_std::test)]
     async fn parse_capability_case_insensitive_test() {
         // Test that "IMAP4REV1" (instead of "IMAP4rev1") is accepted
         let expected_capabilities = &["IMAP4rev1", "STARTTLS"];
         let responses = input_stream(&["* CAPABILITY IMAP4REV1 STARTTLS\r\n"]);
         let mut stream = async_std::stream::from_iter(responses);
 
-        let (send, recv) = channel::bounded(10);
+        let (send, recv) = bounded(10);
         let id = RequestId("A0001".into());
         let capabilities = parse_capabilities(&mut stream, send, id).await.unwrap();
 
@@ -417,10 +423,11 @@ mod tests {
         }
     }
 
-    #[async_std::test]
+    #[cfg_attr(feature = "runtime-tokio", tokio::test)]
+    #[cfg_attr(feature = "runtime-async-std", async_std::test)]
     #[should_panic]
     async fn parse_capability_invalid_test() {
-        let (send, recv) = channel::bounded(10);
+        let (send, recv) = bounded(10);
         let responses = input_stream(&["* JUNK IMAP4rev1 STARTTLS AUTH=GSSAPI LOGINDISABLED\r\n"]);
         let mut stream = async_std::stream::from_iter(responses);
 
@@ -431,45 +438,48 @@ mod tests {
         assert!(recv.is_empty());
     }
 
-    #[async_std::test]
+    #[cfg_attr(feature = "runtime-tokio", tokio::test)]
+    #[cfg_attr(feature = "runtime-async-std", async_std::test)]
     async fn parse_names_test() {
-        let (send, recv) = channel::bounded(10);
+        let (send, recv) = bounded(10);
         let responses = input_stream(&["* LIST (\\HasNoChildren) \".\" \"INBOX\"\r\n"]);
         let mut stream = async_std::stream::from_iter(responses);
 
         let id = RequestId("A0001".into());
         let names: Vec<_> = parse_names(&mut stream, send, id)
-            .collect::<Result<Vec<Name>>>()
+            .try_collect::<Vec<Name>>()
             .await
             .unwrap();
         assert!(recv.is_empty());
         assert_eq!(names.len(), 1);
         assert_eq!(
             names[0].attributes(),
-            &[NameAttribute::from("\\HasNoChildren")]
+            &[NameAttribute::Extension("\\HasNoChildren".into())]
         );
         assert_eq!(names[0].delimiter(), Some("."));
         assert_eq!(names[0].name(), "INBOX");
     }
 
-    #[async_std::test]
+    #[cfg_attr(feature = "runtime-tokio", tokio::test)]
+    #[cfg_attr(feature = "runtime-async-std", async_std::test)]
     async fn parse_fetches_empty() {
-        let (send, recv) = channel::bounded(10);
+        let (send, recv) = bounded(10);
         let responses = input_stream(&[]);
         let mut stream = async_std::stream::from_iter(responses);
         let id = RequestId("a".into());
 
         let fetches = parse_fetches(&mut stream, send, id)
-            .collect::<Result<Vec<_>>>()
+            .try_collect::<Vec<_>>()
             .await
             .unwrap();
         assert!(recv.is_empty());
         assert!(fetches.is_empty());
     }
 
-    #[async_std::test]
+    #[cfg_attr(feature = "runtime-tokio", tokio::test)]
+    #[cfg_attr(feature = "runtime-async-std", async_std::test)]
     async fn parse_fetches_test() {
-        let (send, recv) = channel::bounded(10);
+        let (send, recv) = bounded(10);
         let responses = input_stream(&[
             "* 24 FETCH (FLAGS (\\Seen) UID 4827943)\r\n",
             "* 25 FETCH (FLAGS (\\Seen))\r\n",
@@ -478,7 +488,7 @@ mod tests {
         let id = RequestId("a".into());
 
         let fetches = parse_fetches(&mut stream, send, id)
-            .collect::<Result<Vec<_>>>()
+            .try_collect::<Vec<_>>()
             .await
             .unwrap();
         assert!(recv.is_empty());
@@ -496,16 +506,17 @@ mod tests {
         assert_eq!(fetches[1].header(), None);
     }
 
-    #[async_std::test]
+    #[cfg_attr(feature = "runtime-tokio", tokio::test)]
+    #[cfg_attr(feature = "runtime-async-std", async_std::test)]
     async fn parse_fetches_w_unilateral() {
         // https://github.com/mattnenterprise/rust-imap/issues/81
-        let (send, recv) = channel::bounded(10);
+        let (send, recv) = bounded(10);
         let responses = input_stream(&["* 37 FETCH (UID 74)\r\n", "* 1 RECENT\r\n"]);
         let mut stream = async_std::stream::from_iter(responses);
         let id = RequestId("a".into());
 
         let fetches = parse_fetches(&mut stream, send, id)
-            .collect::<Result<Vec<_>>>()
+            .try_collect::<Vec<_>>()
             .await
             .unwrap();
         assert_eq!(recv.recv().await.unwrap(), UnsolicitedResponse::Recent(1));
@@ -515,9 +526,10 @@ mod tests {
         assert_eq!(fetches[0].uid, Some(74));
     }
 
-    #[async_std::test]
+    #[cfg_attr(feature = "runtime-tokio", tokio::test)]
+    #[cfg_attr(feature = "runtime-async-std", async_std::test)]
     async fn parse_names_w_unilateral() {
-        let (send, recv) = channel::bounded(10);
+        let (send, recv) = bounded(10);
         let responses = input_stream(&[
             "* LIST (\\HasNoChildren) \".\" \"INBOX\"\r\n",
             "* 4 EXPUNGE\r\n",
@@ -526,7 +538,7 @@ mod tests {
 
         let id = RequestId("A0001".into());
         let names = parse_names(&mut stream, send, id)
-            .collect::<Result<Vec<_>>>()
+            .try_collect::<Vec<_>>()
             .await
             .unwrap();
 
@@ -535,15 +547,16 @@ mod tests {
         assert_eq!(names.len(), 1);
         assert_eq!(
             names[0].attributes(),
-            &[NameAttribute::from("\\HasNoChildren")]
+            &[NameAttribute::Extension("\\HasNoChildren".into())]
         );
         assert_eq!(names[0].delimiter(), Some("."));
         assert_eq!(names[0].name(), "INBOX");
     }
 
-    #[async_std::test]
+    #[cfg_attr(feature = "runtime-tokio", tokio::test)]
+    #[cfg_attr(feature = "runtime-async-std", async_std::test)]
     async fn parse_capabilities_w_unilateral() {
-        let (send, recv) = channel::bounded(10);
+        let (send, recv) = bounded(10);
         let responses = input_stream(&[
             "* CAPABILITY IMAP4rev1 STARTTLS AUTH=GSSAPI LOGINDISABLED\r\n",
             "* STATUS dev.github (MESSAGES 10 UIDNEXT 11 UIDVALIDITY 1408806928 UNSEEN 0)\r\n",
@@ -576,9 +589,10 @@ mod tests {
         assert_eq!(recv.recv().await.unwrap(), UnsolicitedResponse::Exists(4));
     }
 
-    #[async_std::test]
+    #[cfg_attr(feature = "runtime-tokio", tokio::test)]
+    #[cfg_attr(feature = "runtime-async-std", async_std::test)]
     async fn parse_ids_w_unilateral() {
-        let (send, recv) = channel::bounded(10);
+        let (send, recv) = bounded(10);
         let responses = input_stream(&[
             "* SEARCH 23 42 4711\r\n",
             "* 1 RECENT\r\n",
@@ -606,9 +620,10 @@ mod tests {
         );
     }
 
-    #[async_std::test]
+    #[cfg_attr(feature = "runtime-tokio", tokio::test)]
+    #[cfg_attr(feature = "runtime-async-std", async_std::test)]
     async fn parse_ids_test() {
-        let (send, recv) = channel::bounded(10);
+        let (send, recv) = bounded(10);
         let responses = input_stream(&[
                 "* SEARCH 1600 1698 1739 1781 1795 1885 1891 1892 1893 1898 1899 1901 1911 1926 1932 1933 1993 1994 2007 2032 2033 2041 2053 2062 2063 2065 2066 2072 2078 2079 2082 2084 2095 2100 2101 2102 2103 2104 2107 2116 2120 2135 2138 2154 2163 2168 2172 2189 2193 2198 2199 2205 2212 2213 2221 2227 2267 2275 2276 2295 2300 2328 2330 2332 2333 2334\r\n",
                 "* SEARCH 2335 2336 2337 2338 2339 2341 2342 2347 2349 2350 2358 2359 2362 2369 2371 2372 2373 2374 2375 2376 2377 2378 2379 2380 2381 2382 2383 2384 2385 2386 2390 2392 2397 2400 2401 2403 2405 2409 2411 2414 2417 2419 2420 2424 2426 2428 2439 2454 2456 2467 2468 2469 2490 2515 2519 2520 2521\r\n",
@@ -639,9 +654,10 @@ mod tests {
         );
     }
 
-    #[async_std::test]
+    #[cfg_attr(feature = "runtime-tokio", tokio::test)]
+    #[cfg_attr(feature = "runtime-async-std", async_std::test)]
     async fn parse_ids_search() {
-        let (send, recv) = channel::bounded(10);
+        let (send, recv) = bounded(10);
         let responses = input_stream(&["* SEARCH\r\n"]);
         let mut stream = async_std::stream::from_iter(responses);
 
@@ -653,9 +669,10 @@ mod tests {
         assert_eq!(ids, HashSet::<u32>::new());
     }
 
-    #[async_std::test]
+    #[cfg_attr(feature = "runtime-tokio", tokio::test)]
+    #[cfg_attr(feature = "runtime-async-std", async_std::test)]
     async fn parse_mailbox_does_not_exist_error() {
-        let (send, recv) = channel::bounded(10);
+        let (send, recv) = bounded(10);
         let responses = input_stream(&[
             "A0003 NO Mailbox doesn't exist: DeltaChat (0.001 + 0.140 + 0.139 secs).\r\n",
         ]);

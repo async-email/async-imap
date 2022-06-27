@@ -1,13 +1,12 @@
 //! IMAP error types.
 
 use std::io::Error as IoError;
-use std::result;
 use std::str::Utf8Error;
 
 use base64::DecodeError;
 
 /// A convenience wrapper around `Result` for `imap::Error`.
-pub type Result<T> = result::Result<T, Error>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 /// A set of errors that can occur in the IMAP client
 #[derive(thiserror::Error, Debug)]

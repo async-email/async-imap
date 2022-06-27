@@ -4,12 +4,20 @@ use std::fmt;
 use std::pin::Pin;
 use std::time::Duration;
 
-use async_std::io::{self, Read, Write};
-use async_std::prelude::*;
-use async_std::stream::Stream;
+#[cfg(feature = "runtime-async-std")]
+use async_std::{
+    future::timeout,
+    io::{Read, Write},
+};
+use futures::prelude::*;
 use futures::task::{Context, Poll};
 use imap_proto::{RequestId, Response, Status};
 use stop_token::prelude::*;
+#[cfg(feature = "runtime-tokio")]
+use tokio::{
+    io::{AsyncRead as Read, AsyncWrite as Write},
+    time::timeout,
+};
 
 use crate::client::Session;
 use crate::error::Result;
@@ -40,7 +48,7 @@ pub struct Handle<T: Read + Write + Unpin + fmt::Debug> {
 impl<T: Read + Write + Unpin + fmt::Debug> Unpin for Handle<T> {}
 
 impl<T: Read + Write + Unpin + fmt::Debug + Send> Stream for Handle<T> {
-    type Item = io::Result<ResponseData>;
+    type Item = std::io::Result<ResponseData>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.as_mut().session().get_stream().poll_next(cx)
@@ -141,7 +149,7 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Handle<T> {
     /// Must be called after [Handle::init].
     pub fn wait_with_timeout(
         &mut self,
-        timeout: Duration,
+        dur: Duration,
     ) -> (
         impl Future<Output = Result<IdleResponse>> + '_,
         stop_token::StopSource,
@@ -153,7 +161,7 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Handle<T> {
 
         let (waiter, interrupt) = self.wait();
         let fut = async move {
-            match async_std::future::timeout(timeout, waiter).await {
+            match timeout(dur, waiter).await {
                 Ok(res) => res,
                 Err(_err) => Ok(IdleResponse::Timeout),
             }
@@ -180,8 +188,8 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Handle<T> {
                 } => {
                     if tag == self.id.as_ref().unwrap() {
                         if let Status::Bad = status {
-                            return Err(io::Error::new(
-                                io::ErrorKind::ConnectionRefused,
+                            return Err(std::io::Error::new(
+                                std::io::ErrorKind::ConnectionRefused,
                                 information.as_ref().unwrap().to_string(),
                             )
                             .into());
@@ -195,7 +203,7 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Handle<T> {
             }
         }
 
-        Err(io::Error::new(io::ErrorKind::ConnectionRefused, "").into())
+        Err(std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "").into())
     }
 
     /// Signal that we want to exit the idle connection, by sending the `DONE`

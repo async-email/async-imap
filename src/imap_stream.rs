@@ -1,14 +1,17 @@
 use std::fmt;
 use std::pin::Pin;
+use std::sync::Arc;
 
-use async_std::io::{self, Read, Write};
-use async_std::prelude::*;
-use async_std::stream::Stream;
-use async_std::sync::Arc;
+#[cfg(feature = "runtime-async-std")]
+use async_std::io::{Read, Write, WriteExt};
 use byte_pool::{Block, BytePool};
+use futures::stream::Stream;
 use futures::task::{Context, Poll};
+use futures::{io, ready};
 use nom::Needed;
 use once_cell::sync::Lazy;
+#[cfg(feature = "runtime-tokio")]
+use tokio::io::{AsyncRead as Read, AsyncWrite as Write, AsyncWriteExt};
 
 use crate::types::{Request, ResponseData};
 
@@ -287,13 +290,19 @@ impl<R: Read + Write + Unpin> Stream for ImapStream<R> {
         }
         loop {
             this.buffer.ensure_capacity(this.decode_needs)?;
-            let num_bytes_read =
-                match Pin::new(&mut this.inner).poll_read(cx, this.buffer.free_as_mut_slice()) {
-                    Poll::Ready(result) => result?,
-                    Poll::Pending => {
-                        return Poll::Pending;
-                    }
-                };
+            let buf = this.buffer.free_as_mut_slice();
+
+            #[cfg(feature = "runtime-async-std")]
+            let num_bytes_read = ready!(Pin::new(&mut this.inner).poll_read(cx, buf))?;
+
+            #[cfg(feature = "runtime-tokio")]
+            let num_bytes_read = {
+                let buf = &mut tokio::io::ReadBuf::new(buf);
+                let start = buf.filled().len();
+                ready!(Pin::new(&mut this.inner).poll_read(cx, buf))?;
+                buf.filled().len() - start
+            };
+
             if num_bytes_read == 0 {
                 this.closed = true;
                 return Poll::Ready(this.stream_eof_value());

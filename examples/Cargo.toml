@@ -1,0 +1,25 @@
+[package]
+name = "async-imap-examples"
+version = "0.1.0"
+publish = false
+authors = ["dignifiedquire <me@dignifiedquire.com>"]
+license = "Apache-2.0/MIT"
+edition = "2018"
+
+[features]
+default = ["runtime-async-std"]
+
+runtime-async-std = ["async-std", "async-native-tls/runtime-async-std", "async-smtp/runtime-async-std", "async-imap/runtime-async-std"]
+runtime-tokio = ["tokio", "async-native-tls/runtime-tokio", "async-smtp/runtime-tokio", "async-imap/runtime-tokio"]
+
+[dependencies]
+async-imap = { path = "../", default-features = false }
+async-native-tls = { version = "0.4", default-features = false }
+async-smtp = { version = "0.4", default-features = false, features = ["smtp-transport"] }
+
+async-std = { version = "1.8.0", features = ["std", "attributes"], optional = true }
+futures = "0.3.21"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
+
+[patch.crates-io]
+async-smtp = { git = "https://github.com/async-email/async-smtp", branch = "tokio" }

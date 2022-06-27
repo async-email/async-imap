@@ -16,7 +16,7 @@
 //! Below is a basic client example. See the `examples/` directory for more.
 //!
 //! ```no_run
-//! use async_std::prelude::*;
+//! use futures::prelude::*;
 //! use async_imap::error::Result;
 //!
 //! async fn fetch_inbox_top() -> Result<Option<String>> {
@@ -40,7 +40,7 @@
 //!     // fetch message number 1 in this mailbox, along with its RFC822 field.
 //!     // RFC 822 dictates the format of the body of e-mails
 //!     let messages_stream = imap_session.fetch("1", "RFC822").await?;
-//!     let messages: Vec<_> = messages_stream.collect::<Result<_>>().await?;
+//!     let messages: Vec<_> = messages_stream.try_collect().await?;
 //!     let message = if let Some(m) = messages.first() {
 //!         m
 //!     } else {
@@ -62,6 +62,11 @@
 #![warn(missing_docs)]
 #![deny(rust_2018_idioms, unsafe_code)]
 
+#[cfg(not(any(feature = "runtime-tokio", feature = "runtime-async-std")))]
+compile_error!("one of 'runtime-async-std' or 'runtime-tokio' features must be enabled");
+
+#[cfg(all(feature = "runtime-tokio", feature = "runtime-async-std"))]
+compile_error!("only one of 'runtime-async-std' or 'runtime-tokio' features must be enabled");
 #[macro_use]
 extern crate pin_utils;
 

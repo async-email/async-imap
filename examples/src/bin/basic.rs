@@ -1,20 +1,20 @@
-use async_imap::error::{Error, Result};
-use async_std::prelude::*;
-use async_std::task;
 use std::env;
 
-fn main() -> Result<()> {
-    task::block_on(async {
-        let args: Vec<String> = env::args().collect();
-        if args.len() != 4 {
-            eprintln!("need three arguments: imap-server login password");
-            Err(Error::Bad("need three arguments".into()))
-        } else {
-            let res = fetch_inbox_top(&args[1], &args[2], &args[3]).await?;
-            println!("**result:\n{}", res.unwrap());
-            Ok(())
-        }
-    })
+use async_imap::error::{Error, Result};
+use futures::TryStreamExt;
+
+#[cfg_attr(feature = "runtime-tokio", tokio::main)]
+#[cfg_attr(feature = "runtime-async-std", async_std::main)]
+async fn main() -> Result<()> {
+    let args: Vec<String> = env::args().collect();
+    if args.len() != 4 {
+        eprintln!("need three arguments: imap-server login password");
+        Err(Error::Bad("need three arguments".into()))
+    } else {
+        let res = fetch_inbox_top(&args[1], &args[2], &args[3]).await?;
+        println!("**result:\n{}", res.unwrap());
+        Ok(())
+    }
 }
 
 async fn fetch_inbox_top(imap_server: &str, login: &str, password: &str) -> Result<Option<String>> {
@@ -38,7 +38,7 @@ async fn fetch_inbox_top(imap_server: &str, login: &str, password: &str) -> Resu
     // fetch message number 1 in this mailbox, along with its RFC822 field.
     // RFC 822 dictates the format of the body of e-mails
     let messages_stream = imap_session.fetch("1", "RFC822").await?;
-    let messages: Vec<_> = messages_stream.collect::<Result<_>>().await?;
+    let messages: Vec<_> = messages_stream.try_collect().await?;
     let message = if let Some(m) = messages.first() {
         m
     } else {

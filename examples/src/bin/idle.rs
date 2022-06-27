@@ -1,22 +1,27 @@
-use async_imap::error::{Error, Result};
-use async_std::prelude::*;
-// use async_std::io;
-use async_imap::extensions::idle::IdleResponse::*;
-use async_std::task;
 use std::env;
 use std::time::Duration;
 
-fn main() -> Result<()> {
-    task::block_on(async {
-        let args: Vec<String> = env::args().collect();
-        if args.len() != 4 {
-            eprintln!("need three arguments: imap-server login password");
-            Err(Error::Bad("need three arguments".into()))
-        } else {
-            fetch_and_idle(&args[1], &args[2], &args[3]).await?;
-            Ok(())
-        }
-    })
+use async_imap::error::{Error, Result};
+use async_imap::extensions::idle::IdleResponse::*;
+use futures::StreamExt;
+
+#[cfg(feature = "runtime-async-std")]
+use async_std::{task, task::sleep};
+
+#[cfg(feature = "runtime-tokio")]
+use tokio::{task, time::sleep};
+
+#[cfg_attr(feature = "runtime-tokio", tokio::main)]
+#[cfg_attr(feature = "runtime-async-std", async_std::main)]
+async fn main() -> Result<()> {
+    let args: Vec<String> = env::args().collect();
+    if args.len() != 4 {
+        eprintln!("need three arguments: imap-server login password");
+        Err(Error::Bad("need three arguments".into()))
+    } else {
+        fetch_and_idle(&args[1], &args[2], &args[3]).await?;
+        Ok(())
+    }
 }
 
 async fn fetch_and_idle(imap_server: &str, login: &str, password: &str) -> Result<()> {
@@ -59,7 +64,7 @@ async fn fetch_and_idle(imap_server: &str, login: &str, password: &str) -> Resul
 
     task::spawn(async move {
         println!("-- thread: waiting for 30s");
-        task::sleep(Duration::from_secs(30)).await;
+        sleep(Duration::from_secs(30)).await;
         println!("-- thread: waited 30 secs, now interrupting idle");
         drop(interrupt);
     });
