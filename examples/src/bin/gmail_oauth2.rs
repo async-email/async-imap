@@ -49,9 +49,6 @@ async fn main() -> Result<()> {
             e
         })?;
 
-        // TODO: get rid of this
-        let mut msgs = unsafe { std::pin::Pin::new_unchecked(&mut msgs) };
-
         while let Some(msg) = msgs.next().await {
             print!("{:?}", msg?);
         }
