@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
@@ -11,6 +11,7 @@ use async_std::{
     io::{Read, Write, WriteExt},
     net::{TcpStream, ToSocketAddrs},
 };
+use extensions::id::{format_identification, parse_id};
 use extensions::quota::parse_get_quota_root;
 use futures::{io, Stream, StreamExt};
 use imap_proto::{RequestId, Response};
@@ -1305,6 +1306,39 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Session<T> {
         )
         .await?;
         Ok(c)
+    }
+
+    /// The [`ID` command](https://datatracker.ietf.org/doc/html/rfc2971)
+    ///
+    /// `identification` is an iterable sequence of pairs such as `("name", Some("MyMailClient"))`.
+    pub async fn id(
+        &mut self,
+        identification: impl IntoIterator<Item = (&str, Option<&str>)>,
+    ) -> Result<Option<HashMap<String, String>>> {
+        let id = self
+            .run_command(format!("ID ({})", format_identification(identification)))
+            .await?;
+        let server_identification = parse_id(
+            &mut self.conn.stream,
+            self.unsolicited_responses_tx.clone(),
+            id,
+        )
+        .await?;
+        Ok(server_identification)
+    }
+
+    /// Similar to `id`, but don't identify ourselves.
+    ///
+    /// Sends `ID NIL` command and returns server response.
+    pub async fn id_nil(&mut self) -> Result<Option<HashMap<String, String>>> {
+        let id = self.run_command("ID NIL").await?;
+        let server_identification = parse_id(
+            &mut self.conn.stream,
+            self.unsolicited_responses_tx.clone(),
+            id,
+        )
+        .await?;
+        Ok(server_identification)
     }
 
     // these are only here because they are public interface, the rest is in `Connection`
