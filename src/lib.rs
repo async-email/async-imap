@@ -17,11 +17,11 @@
 //!
 //! ```no_run
 //! use futures::prelude::*;
-//! use async_imap::error::Result;
+//! use async_imap::{types::TlsConnector, error::Result};
 //!
 //! async fn fetch_inbox_top() -> Result<Option<String>> {
 //!     let domain = "imap.example.com";
-//!     let tls = async_native_tls::TlsConnector::new();
+//!     let tls = TlsConnector::new();
 //!
 //!     // we pass in the domain twice to check that the server's TLS
 //!     // certificate is valid for the domain we're connecting to.

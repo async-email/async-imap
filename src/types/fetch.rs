@@ -1,10 +1,10 @@
-use chrono::{DateTime, FixedOffset};
+use chrono::DateTime;
 use imap_proto::types::{
     AttributeValue, BodyStructure, Envelope, MessageSection, Response, SectionPath,
 };
 
 use super::{Flag, Seq, Uid};
-use crate::types::ResponseData;
+use crate::types::{FixedOffsetDateTime, ResponseData};
 
 /// Format of Date and Time as defined RFC3501.
 /// See `date-time` element in [Formal Syntax](https://tools.ietf.org/html/rfc3501#section-9)
@@ -194,7 +194,7 @@ impl Fetch {
     ///
     /// See [section 2.3.3 of RFC 3501](https://tools.ietf.org/html/rfc3501#section-2.3.3) for
     /// details.
-    pub fn internal_date(&self) -> Option<DateTime<FixedOffset>> {
+    pub fn internal_date(&self) -> Option<FixedOffsetDateTime> {
         if let Response::Fetch(_, attrs) = self.response.parsed() {
             attrs
                 .iter()

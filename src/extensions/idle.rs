@@ -22,7 +22,7 @@ use tokio::{
 use crate::client::Session;
 use crate::error::Result;
 use crate::parse::handle_unilateral;
-use crate::types::ResponseData;
+use crate::types::{ResponseData, StopSource};
 
 /// `Handle` allows a client to block waiting for changes to the remote mailbox.
 ///
@@ -106,12 +106,7 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Handle<T> {
 
     /// Start listening to the server side resonses.
     /// Must be called after [Handle::init].
-    pub fn wait(
-        &mut self,
-    ) -> (
-        impl Future<Output = Result<IdleResponse>> + '_,
-        stop_token::StopSource,
-    ) {
+    pub fn wait(&mut self) -> (impl Future<Output = Result<IdleResponse>> + '_, StopSource) {
         assert!(
             self.id.is_some(),
             "Cannot listen to response without starting IDLE"
@@ -150,10 +145,7 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Handle<T> {
     pub fn wait_with_timeout(
         &mut self,
         dur: Duration,
-    ) -> (
-        impl Future<Output = Result<IdleResponse>> + '_,
-        stop_token::StopSource,
-    ) {
+    ) -> (impl Future<Output = Result<IdleResponse>> + '_, StopSource) {
         assert!(
             self.id.is_some(),
             "Cannot listen to response without starting IDLE"

@@ -1,8 +1,11 @@
 use std::env;
 use std::time::Duration;
 
-use async_imap::error::{Error, Result};
-use async_imap::extensions::idle::IdleResponse::*;
+use async_imap::{
+    error::{Error, Result},
+    extensions::idle::IdleResponse::*,
+    types::TlsConnector,
+};
 use futures::StreamExt;
 
 #[cfg(feature = "runtime-async-std")]
@@ -25,7 +28,7 @@ async fn main() -> Result<()> {
 }
 
 async fn fetch_and_idle(imap_server: &str, login: &str, password: &str) -> Result<()> {
-    let tls = async_native_tls::TlsConnector::new();
+    let tls = TlsConnector::new();
     let imap_addr = (imap_server, 993);
 
     // we pass in the imap_server twice to check that the server's TLS

@@ -5,11 +5,10 @@ use std::pin::Pin;
 use std::str;
 
 use async_channel::{self as channel, bounded};
-use async_native_tls::{TlsConnector, TlsStream};
 #[cfg(feature = "runtime-async-std")]
 use async_std::{
     io::{Read, Write, WriteExt},
-    net::{TcpStream, ToSocketAddrs},
+    net::ToSocketAddrs,
 };
 use extensions::id::{format_identification, parse_id};
 use extensions::quota::parse_get_quota_root;
@@ -18,7 +17,7 @@ use imap_proto::{RequestId, Response};
 #[cfg(feature = "runtime-tokio")]
 use tokio::{
     io::{AsyncRead as Read, AsyncWrite as Write, AsyncWriteExt},
-    net::{TcpStream, ToSocketAddrs},
+    net::ToSocketAddrs,
 };
 
 use super::authenticator::Authenticator;
@@ -122,7 +121,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> DerefMut for Session<T> {
 /// # fn main() -> async_imap::error::Result<()> {
 /// # async_std::task::block_on(async {
 ///
-/// let tls = async_native_tls::TlsConnector::new();
+/// let tls = async_imap::types::TlsConnector::new();
 /// let client = async_imap::connect(("imap.example.org", 993), "imap.example.org", tls).await?;
 ///
 /// # Ok(())
@@ -219,7 +218,7 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Client<T> {
     /// # fn main() -> async_imap::error::Result<()> {
     /// # async_std::task::block_on(async {
     ///
-    /// let tls = async_native_tls::TlsConnector::new();
+    /// let tls = async_imap::types::TlsConnector::new();
     /// let client = async_imap::connect(
     ///     ("imap.example.org", 993),
     ///     "imap.example.org",
@@ -284,7 +283,7 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Client<T> {
     ///     };
     ///
     ///     let domain = "imap.example.com";
-    ///     let tls = async_native_tls::TlsConnector::new();
+    ///     let tls = async_imap::types::TlsConnector::new();
     ///     let client = async_imap::connect((domain, 993), domain, tls).await?;
     ///     match client.authenticate("XOAUTH2", &auth).await {
     ///         Ok(session) => {

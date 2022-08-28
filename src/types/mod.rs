@@ -213,6 +213,10 @@ pub(crate) use self::response_data::ResponseData;
 mod request;
 pub(crate) use self::request::Request;
 
+// Reexport types used in the public API
+mod thirdparty;
+pub use self::thirdparty::*;
+
 mod quota;
 pub use self::quota::*;
 

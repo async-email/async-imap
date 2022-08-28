@@ -1,4 +1,4 @@
-use async_imap::error::Result;
+use async_imap::{error::Result, types::TlsConnector};
 use futures::StreamExt;
 
 struct GmailOAuth2 {
@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
     let domain = "imap.gmail.com";
     let port = 993;
     let socket_addr = (domain, port);
-    let tls = async_native_tls::TlsConnector::new();
+    let tls = TlsConnector::new();
     let client = async_imap::connect(socket_addr, domain, tls).await?;
 
     let mut imap_session = match client.authenticate("XOAUTH2", &gmail_auth).await {

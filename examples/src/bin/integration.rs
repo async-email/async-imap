@@ -1,17 +1,19 @@
 use std::borrow::Cow;
 use std::time::Duration;
 
-use async_imap::Session;
-use async_native_tls::TlsConnector;
+use async_imap::{
+    types::{TcpStream, TlsConnector, TlsStream},
+    Session,
+};
 use async_smtp::ServerAddress;
 #[cfg(feature = "runtime-async-std")]
-use async_std::{net::TcpStream, task, task::sleep};
+use async_std::{task, task::sleep};
 use futures::{StreamExt, TryStreamExt};
 #[cfg(feature = "runtime-tokio")]
-use tokio::{net::TcpStream, task, time::sleep};
+use tokio::{task, time::sleep};
 
-fn native_tls() -> async_native_tls::TlsConnector {
-    async_native_tls::TlsConnector::new()
+fn native_tls() -> TlsConnector {
+    TlsConnector::new()
         .danger_accept_invalid_certs(true)
         .danger_accept_invalid_hostnames(true)
 }
@@ -26,7 +28,7 @@ fn test_host() -> String {
     std::env::var("TEST_HOST").unwrap_or_else(|_| "127.0.0.1".into())
 }
 
-async fn session(user: &str) -> Session<async_native_tls::TlsStream<TcpStream>> {
+async fn session(user: &str) -> Session<TlsStream<TcpStream>> {
     async_imap::connect(&format!("{}:3993", test_host()), "imap.example.com", tls())
         .await
         .unwrap()
