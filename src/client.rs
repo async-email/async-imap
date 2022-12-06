@@ -3,6 +3,7 @@ use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::str;
+use std::time::Duration;
 
 use async_channel::{self as channel, bounded};
 use async_native_tls::{TlsConnector, TlsStream};
@@ -76,6 +77,9 @@ pub struct Connection<T: Read + Write + Unpin + fmt::Debug> {
 
     /// Manages the request ids.
     pub(crate) request_ids: IdGenerator,
+
+    /// Timeout for read and write operations on the connection.
+    pub(crate) timeout: Duration,
 }
 
 // `Deref` instances are so we can make use of the same underlying primitives in `Client` and
@@ -199,8 +203,14 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Client<T> {
             conn: Connection {
                 stream,
                 request_ids: IdGenerator::new(),
+                timeout: Duration::new(60, 0),
             },
         }
+    }
+
+    /// Set a timeout for read and write operations.
+    pub fn set_timeout(&mut self, timeout: Duration) {
+        self.conn.timeout = timeout;
     }
 
     /// Convert this Client into the raw underlying stream.
@@ -1384,8 +1394,20 @@ impl<T: Read + Write + Unpin + fmt::Debug> Connection<T> {
     }
 
     /// Read the next response on the connection.
+    #[cfg(feature = "runtime-tokio")]
     pub async fn read_response(&mut self) -> Option<io::Result<ResponseData>> {
-        self.stream.next().await
+        match tokio::time::timeout(self.timeout, self.stream.next()).await {
+            Err(err) => Some(Err(std::io::Error::new(std::io::ErrorKind::TimedOut, err))),
+            Ok(res) => res,
+        }
+    }
+
+    #[cfg(feature = "runtime-async-std")]
+    pub async fn read_response(&mut self) -> Option<io::Result<ResponseData>> {
+        match async_std::future::timeout(self.timeout, self.stream.next()).await {
+            Err(err) => Some(Err(io::Error::new(io::ErrorKind::TimedOut, err))),
+            Ok(res) => res,
+        }
     }
 
     pub(crate) async fn run_command_untagged(&mut self, command: &str) -> Result<()> {
