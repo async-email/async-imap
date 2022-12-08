@@ -57,6 +57,14 @@ impl<T: Read + Write + Unpin + fmt::Debug> Unpin for Session<T> {}
 impl<T: Read + Write + Unpin + fmt::Debug> Unpin for Client<T> {}
 impl<T: Read + Write + Unpin + fmt::Debug> Unpin for Connection<T> {}
 
+// Make it possible to access the inner connection and modify its settings, such as read/write
+// timeouts.
+impl<T: Read + Write + Unpin + fmt::Debug> AsMut<T> for Session<T> {
+    fn as_mut(&mut self) -> &mut T {
+        self.conn.stream.as_mut()
+    }
+}
+
 /// An (unauthenticated) handle to talk to an IMAP server. This is what you get when first
 /// connecting. A succesfull call to [`Client::login`] or [`Client::authenticate`] will return a
 /// [`Session`] instance that provides the usual IMAP methods.

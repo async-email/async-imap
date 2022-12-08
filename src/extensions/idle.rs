@@ -97,6 +97,14 @@ pub enum IdleResponse {
     NewData(ResponseData),
 }
 
+// Make it possible to access the inner connection and modify its settings, such as read/write
+// timeouts.
+impl<T: Read + Write + Unpin + fmt::Debug> AsMut<T> for Handle<T> {
+    fn as_mut(&mut self) -> &mut T {
+        self.session.conn.stream.as_mut()
+    }
+}
+
 impl<T: Read + Write + Unpin + fmt::Debug + Send> Handle<T> {
     unsafe_pinned!(session: Session<T>);
 
