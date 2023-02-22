@@ -4,15 +4,6 @@ use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::str;
 
-#[cfg(feature = "async-native-tls")]
-use async_native_tls::{TlsConnector, TlsStream};
-
-#[cfg(all(feature = "async-native-tls", feature = "runtime-tokio"))]
-use tokio::net::{TcpStream, ToSocketAddrs};
-
-#[cfg(all(feature = "async-native-tls", feature = "runtime-async-std"))]
-use async_std::net::{TcpStream, ToSocketAddrs};
-
 use async_channel::{self as channel, bounded};
 #[cfg(feature = "runtime-async-std")]
 use async_std::io::{Read, Write, WriteExt};
@@ -115,68 +106,6 @@ impl<T: Read + Write + Unpin + fmt::Debug> Deref for Session<T> {
 impl<T: Read + Write + Unpin + fmt::Debug> DerefMut for Session<T> {
     fn deref_mut(&mut self) -> &mut Connection<T> {
         &mut self.conn
-    }
-}
-
-/// Connect to a server using a TLS-encrypted connection.
-///
-/// The returned [`Client`] is unauthenticated; to access session-related methods (through
-/// [`Session`]), use [`Client::login`] or [`Client::authenticate`].
-///
-/// The domain must be passed in separately from the `TlsConnector` so that the certificate of the
-/// IMAP server can be validated.
-///
-/// # Examples
-///
-/// ```no_run
-/// # fn main() -> async_imap::error::Result<()> {
-/// # async_std::task::block_on(async {
-///
-/// let tls = async_native_tls::TlsConnector::new();
-/// let client = async_imap::connect(("imap.example.org", 993), "imap.example.org", tls).await?;
-///
-/// # Ok(())
-/// # }) }
-/// ```
-#[cfg(feature = "async-native-tls")]
-pub async fn connect<A: ToSocketAddrs, S: AsRef<str>>(
-    addr: A,
-    domain: S,
-    ssl_connector: TlsConnector,
-) -> Result<Client<TlsStream<TcpStream>>> {
-    let stream = TcpStream::connect(addr).await?;
-    let ssl_stream = ssl_connector.connect(domain.as_ref(), stream).await?;
-
-    let mut client = Client::new(ssl_stream);
-    let _greeting = match client.read_response().await {
-        Some(greeting) => greeting,
-        None => {
-            return Err(Error::Bad(
-                "could not read server Greeting after connect".into(),
-            ));
-        }
-    };
-
-    Ok(client)
-}
-
-impl<T: Read + Write + Unpin + fmt::Debug + Send> Client<T> {
-    /// This will upgrade an IMAP client from using a regular TCP connection to use TLS.
-    ///
-    /// The domain parameter is required to perform hostname verification.
-    #[cfg(feature = "async-native-tls")]
-    pub async fn secure<S: AsRef<str>>(
-        mut self,
-        domain: S,
-        ssl_connector: TlsConnector,
-    ) -> Result<Client<TlsStream<T>>> {
-        self.run_command_and_check_ok("STARTTLS", None).await?;
-        let ssl_stream = ssl_connector
-            .connect(domain.as_ref(), self.conn.stream.into_inner())
-            .await?;
-
-        let client = Client::new(ssl_stream);
-        Ok(client)
     }
 }
 

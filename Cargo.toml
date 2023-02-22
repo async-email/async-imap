@@ -21,8 +21,8 @@ is-it-maintained-open-issues = { repository = "async-email/async-imap" }
 [features]
 default = ["runtime-async-std"]
 
-runtime-async-std = ["async-std", "async-native-tls?/runtime-async-std"]
-runtime-tokio = ["tokio", "async-native-tls?/runtime-tokio"]
+runtime-async-std = ["async-std"]
+runtime-tokio = ["tokio"]
 
 [dependencies]
 imap-proto = "0.16.1"
@@ -39,7 +39,6 @@ log = "0.4.8"
 thiserror = "1.0.9"
 async-channel = "1.6.1"
 
-async-native-tls = { version = "0.4", default-features = false, optional = true }
 async-std = { version = "1.8.0", default-features = false, features = ["std", "unstable"], optional = true }
 tokio = { version = "1", features = ["net", "sync", "time", "io-util"], optional = true }
 
@@ -48,4 +47,3 @@ tokio = { version = "1", features = ["net", "sync", "time", "io-util"], optional
 pretty_assertions = "1.2"
 async-std = { version = "1.8.0", features = ["std", "attributes"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
-

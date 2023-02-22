@@ -31,10 +31,6 @@ pub enum Error {
     /// strings](https://tools.ietf.org/html/rfc3501#section-4.3).
     #[error("validate: {0}")]
     Validate(#[from] ValidateError),
-    /// `async_native_tls` error
-    #[cfg(feature = "async-native-tls")]
-    #[error("async_native_tls: {0}")]
-    NativeTlsError(#[from] async_native_tls::Error),
     /// Error appending an e-mail.
     #[error("could not append mail to mailbox")]
     Append,

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Remove `async-native-tls` dependency. TLS streams should be created by the library users as documented in `lib.rs`. #68
 - Do not generate artificial "broken pipe" errors when attempting to send a request
   after reaching EOF on the response stream. #73
 - Do not attempt to track if the stream is closed or not.
