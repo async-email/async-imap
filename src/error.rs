@@ -32,6 +32,7 @@ pub enum Error {
     #[error("validate: {0}")]
     Validate(#[from] ValidateError),
     /// `async_native_tls` error
+    #[cfg(feature = "async-native-tls")]
     #[error("async_native_tls: {0}")]
     NativeTlsError(#[from] async_native_tls::Error),
     /// Error appending an e-mail.

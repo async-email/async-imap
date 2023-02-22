@@ -4,22 +4,24 @@ use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::str;
 
-use async_channel::{self as channel, bounded};
+#[cfg(feature = "async-native-tls")]
 use async_native_tls::{TlsConnector, TlsStream};
+
+#[cfg(all(feature = "async-native-tls", feature = "runtime-tokio"))]
+use tokio::net::{TcpStream, ToSocketAddrs};
+
+#[cfg(all(feature = "async-native-tls", feature = "runtime-async-std"))]
+use async_std::net::{TcpStream, ToSocketAddrs};
+
+use async_channel::{self as channel, bounded};
 #[cfg(feature = "runtime-async-std")]
-use async_std::{
-    io::{Read, Write, WriteExt},
-    net::{TcpStream, ToSocketAddrs},
-};
+use async_std::io::{Read, Write, WriteExt};
 use extensions::id::{format_identification, parse_id};
 use extensions::quota::parse_get_quota_root;
 use futures::{io, Stream, StreamExt};
 use imap_proto::{RequestId, Response};
 #[cfg(feature = "runtime-tokio")]
-use tokio::{
-    io::{AsyncRead as Read, AsyncWrite as Write, AsyncWriteExt},
-    net::{TcpStream, ToSocketAddrs},
-};
+use tokio::io::{AsyncRead as Read, AsyncWrite as Write, AsyncWriteExt};
 
 use super::authenticator::Authenticator;
 use super::error::{Error, ParseError, Result, ValidateError};
@@ -136,6 +138,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> DerefMut for Session<T> {
 /// # Ok(())
 /// # }) }
 /// ```
+#[cfg(feature = "async-native-tls")]
 pub async fn connect<A: ToSocketAddrs, S: AsRef<str>>(
     addr: A,
     domain: S,
@@ -161,6 +164,7 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Client<T> {
     /// This will upgrade an IMAP client from using a regular TCP connection to use TLS.
     ///
     /// The domain parameter is required to perform hostname verification.
+    #[cfg(feature = "async-native-tls")]
     pub async fn secure<S: AsRef<str>>(
         mut self,
         domain: S,
@@ -223,7 +227,7 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Client<T> {
     /// prompting the user for credetials), ownership of the original `Client` needs to be
     /// transferred back to the caller.
     ///
-    /// ```no_run
+    /// ```ignore
     /// # fn main() -> async_imap::error::Result<()> {
     /// # async_std::task::block_on(async {
     ///
@@ -267,7 +271,7 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Client<T> {
     /// Authenticate with the server using the given custom `authenticator` to handle the server's
     /// challenge.
     ///
-    /// ```no_run
+    /// ```ignore
     /// struct OAuth2 {
     ///     user: String,
     ///     access_token: String,

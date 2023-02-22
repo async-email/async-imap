@@ -19,6 +19,7 @@
 //! use futures::prelude::*;
 //! use async_imap::error::Result;
 //!
+//! #[cfg(feature = "async-native-tls")]
 //! async fn fetch_inbox_top() -> Result<Option<String>> {
 //!     let domain = "imap.example.com";
 //!     let tls = async_native_tls::TlsConnector::new();
