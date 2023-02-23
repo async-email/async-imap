@@ -40,7 +40,7 @@ thiserror = "1.0.9"
 async-channel = "1.6.1"
 
 async-native-tls = { version = "0.4", default-features = false, optional = true }
-async-std = { version = "1.8.0", default-features = false, features = ["std"], optional = true }
+async-std = { version = "1.8.0", default-features = false, features = ["std", "unstable"], optional = true }
 tokio = { version = "1", features = ["net", "sync", "time", "io-util"], optional = true }
 
 
