@@ -733,8 +733,8 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Session<T> {
     /// either does not have [`Flag::Deleted`] set or has a [`Uid`] that is not included in the
     /// specified sequence set, it is not affected.
     ///
-    /// This command is particularly useful for disconnected use clients. By using [`uid_expunge`]
-    /// instead of [`expunge`] when resynchronizing with the server, the client can ensure that it
+    /// This command is particularly useful for disconnected use clients. By using `uid_expunge`
+    /// instead of [`Self::expunge`] when resynchronizing with the server, the client can ensure that it
     /// does not inadvertantly remove any messages that have been marked as [`Flag::Deleted`] by
     /// other clients between the time that the client was last connected and the time the client
     /// resynchronizes.

@@ -40,7 +40,7 @@ impl From<&CapabilityRef<'_>> for Capability {
 /// authentication mechanism.
 ///
 /// The `LOGINDISABLED` capability indicates that the `LOGIN` command is disabled, and that the
-/// server will respond with a [`super::Error::No`] response to any attempt to use the `LOGIN`
+/// server will respond with a [`crate::error::Error::No`] response to any attempt to use the `LOGIN`
 /// command even if the user name and password are valid.  An IMAP client MUST NOT issue the
 /// `LOGIN` command if the server advertises the `LOGINDISABLED` capability.
 ///

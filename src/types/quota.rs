@@ -3,7 +3,7 @@ use imap_proto::types::QuotaResource as QuotaResourceRef;
 use imap_proto::types::QuotaResourceName as QuotaResourceNameRef;
 use imap_proto::types::QuotaRoot as QuotaRootRef;
 
-/// https://tools.ietf.org/html/rfc2087#section-3
+/// <https://tools.ietf.org/html/rfc2087#section-3>
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
 pub enum QuotaResourceName {
     /// Sum of messages' RFC822.SIZE, in units of 1024 octets
@@ -24,7 +24,7 @@ impl<'a> From<QuotaResourceNameRef<'a>> for QuotaResourceName {
     }
 }
 
-/// 5.1. QUOTA Response (https://tools.ietf.org/html/rfc2087#section-5.1)
+/// 5.1. QUOTA Response (<https://tools.ietf.org/html/rfc2087#section-5.1>)
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
 pub struct QuotaResource {
     /// name of the resource
@@ -46,13 +46,13 @@ impl<'a> From<QuotaResourceRef<'a>> for QuotaResource {
 }
 
 impl QuotaResource {
-    /// gets the usage percentage of a QuotaResource
+    /// Returns the usage percentage of a QuotaResource.
     pub fn get_usage_percentage(&self) -> u64 {
         self.usage.saturating_mul(100) / self.limit
     }
 }
 
-/// 5.1. QUOTA Response (https://tools.ietf.org/html/rfc2087#section-5.1)
+/// 5.1. QUOTA Response (<https://tools.ietf.org/html/rfc2087#section-5.1>)
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
 pub struct Quota {
     /// quota root name
@@ -70,7 +70,7 @@ impl<'a> From<QuotaRef<'a>> for Quota {
     }
 }
 
-/// 5.2. QUOTAROOT Response (https://tools.ietf.org/html/rfc2087#section-5.2)
+/// 5.2. QUOTAROOT Response (<https://tools.ietf.org/html/rfc2087#section-5.2>)
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
 pub struct QuotaRoot {
     /// mailbox name

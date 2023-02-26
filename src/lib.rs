@@ -8,9 +8,11 @@
 //! challenge/response authentication respectively. This in turn gives you an authenticated
 //! [`Session`], which lets you access the mailboxes at the server.
 //!
-//! The documentation within this crate borrows heavily from the various RFCs, but should not be
-//! considered a complete reference. If anything is unclear, follow the links to the RFCs embedded
-//! in the documentation for the various types and methods and read the raw text there!
+//! The documentation within this crate borrows heavily from the various RFCs,
+//! but should not be considered a complete reference.
+//! If anything is unclear,
+//! follow the links to the RFCs embedded in the documentation
+//! for the various types and methods and read the raw text there!
 //!
 //! Below is a basic client example. See the `examples/` directory for more.
 //!

@@ -1,11 +1,14 @@
 use imap_proto::RequestId;
 
+/// Request ID generator.
 #[derive(Debug)]
 pub struct IdGenerator {
+    /// Last returned ID.
     next: u64,
 }
 
 impl IdGenerator {
+    /// Creates a new request ID generator.
     pub fn new() -> Self {
         Self { next: 0 }
     }
