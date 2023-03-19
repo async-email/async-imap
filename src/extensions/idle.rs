@@ -7,7 +7,7 @@ use std::time::Duration;
 #[cfg(feature = "runtime-async-std")]
 use async_std::{
     future::timeout,
-    io::{Read, Write},
+    io::{BufRead, Write},
 };
 use futures::prelude::*;
 use futures::task::{Context, Poll};
@@ -15,7 +15,7 @@ use imap_proto::{RequestId, Response, Status};
 use stop_token::prelude::*;
 #[cfg(feature = "runtime-tokio")]
 use tokio::{
-    io::{AsyncRead as Read, AsyncWrite as Write},
+    io::{AsyncBufRead as BufRead, AsyncWrite as Write},
     time::timeout,
 };
 
@@ -40,14 +40,14 @@ use crate::types::ResponseData;
 ///
 /// As long as a [`Handle`] is active, the mailbox cannot be otherwise accessed.
 #[derive(Debug)]
-pub struct Handle<T: Read + Write + Unpin + fmt::Debug> {
+pub struct Handle<T: BufRead + Write + Unpin + fmt::Debug> {
     session: Session<T>,
     id: Option<RequestId>,
 }
 
-impl<T: Read + Write + Unpin + fmt::Debug> Unpin for Handle<T> {}
+impl<T: BufRead + Write + Unpin + fmt::Debug> Unpin for Handle<T> {}
 
-impl<T: Read + Write + Unpin + fmt::Debug + Send> Stream for Handle<T> {
+impl<T: BufRead + Write + Unpin + fmt::Debug + Send> Stream for Handle<T> {
     type Item = std::io::Result<ResponseData>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -99,13 +99,13 @@ pub enum IdleResponse {
 
 // Make it possible to access the inner connection and modify its settings, such as read/write
 // timeouts.
-impl<T: Read + Write + Unpin + fmt::Debug> AsMut<T> for Handle<T> {
+impl<T: BufRead + Write + Unpin + fmt::Debug> AsMut<T> for Handle<T> {
     fn as_mut(&mut self) -> &mut T {
         self.session.conn.stream.as_mut()
     }
 }
 
-impl<T: Read + Write + Unpin + fmt::Debug + Send> Handle<T> {
+impl<T: BufRead + Write + Unpin + fmt::Debug + Send> Handle<T> {
     unsafe_pinned!(session: Session<T>);
 
     pub(crate) fn new(session: Session<T>) -> Handle<T> {

@@ -1,6 +1,5 @@
 use std::fmt;
 
-use byte_pool::Block;
 use imap_proto::{RequestId, Response};
 
 #[ouroboros::self_referencing(pub_extras)]

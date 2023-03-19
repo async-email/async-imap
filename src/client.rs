@@ -22,7 +22,7 @@ use extensions::quota::parse_get_quota_root;
 use futures::{io, Stream, StreamExt};
 use imap_proto::{RequestId, Response};
 #[cfg(feature = "runtime-tokio")]
-use tokio::io::{AsyncRead as Read, AsyncWrite as Write, AsyncWriteExt};
+use tokio::io::{AsyncBufRead as BufRead, AsyncWrite as Write, AsyncWriteExt};
 
 use super::authenticator::Authenticator;
 use super::error::{Error, ParseError, Result, ValidateError};
@@ -47,7 +47,7 @@ macro_rules! quote {
 // Both `Client` and `Session` deref to [`Connection`](struct.Connection.html), the underlying
 // primitives type.
 #[derive(Debug)]
-pub struct Session<T: Read + Write + Unpin + fmt::Debug> {
+pub struct Session<T: BufRead + Write + Unpin + fmt::Debug> {
     pub(crate) conn: Connection<T>,
     pub(crate) unsolicited_responses_tx: channel::Sender<UnsolicitedResponse>,
 
@@ -56,13 +56,13 @@ pub struct Session<T: Read + Write + Unpin + fmt::Debug> {
     pub unsolicited_responses: channel::Receiver<UnsolicitedResponse>,
 }
 
-impl<T: Read + Write + Unpin + fmt::Debug> Unpin for Session<T> {}
-impl<T: Read + Write + Unpin + fmt::Debug> Unpin for Client<T> {}
-impl<T: Read + Write + Unpin + fmt::Debug> Unpin for Connection<T> {}
+impl<T: BufRead + Write + Unpin + fmt::Debug> Unpin for Session<T> {}
+impl<T: BufRead + Write + Unpin + fmt::Debug> Unpin for Client<T> {}
+impl<T: BufRead + Write + Unpin + fmt::Debug> Unpin for Connection<T> {}
 
 // Make it possible to access the inner connection and modify its settings, such as read/write
 // timeouts.
-impl<T: Read + Write + Unpin + fmt::Debug> AsMut<T> for Session<T> {
+impl<T: BufRead + Write + Unpin + fmt::Debug> AsMut<T> for Session<T> {
     fn as_mut(&mut self) -> &mut T {
         self.conn.stream.as_mut()
     }
@@ -74,7 +74,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> AsMut<T> for Session<T> {
 // Both `Client` and `Session` deref to [`Connection`](struct.Connection.html), the underlying
 // primitives type.
 #[derive(Debug)]
-pub struct Client<T: Read + Write + Unpin + fmt::Debug> {
+pub struct Client<T: BufRead + Write + Unpin + fmt::Debug> {
     conn: Connection<T>,
 }
 
@@ -82,7 +82,7 @@ pub struct Client<T: Read + Write + Unpin + fmt::Debug> {
 /// login) use a `Connection` internally for the TCP stream primitives.
 #[derive(Debug)]
 #[doc(hidden)]
-pub struct Connection<T: Read + Write + Unpin + fmt::Debug> {
+pub struct Connection<T: BufRead + Write + Unpin + fmt::Debug> {
     pub(crate) stream: ImapStream<T>,
 
     /// Manages the request ids.
@@ -91,7 +91,7 @@ pub struct Connection<T: Read + Write + Unpin + fmt::Debug> {
 
 // `Deref` instances are so we can make use of the same underlying primitives in `Client` and
 // `Session`
-impl<T: Read + Write + Unpin + fmt::Debug> Deref for Client<T> {
+impl<T: BufRead + Write + Unpin + fmt::Debug> Deref for Client<T> {
     type Target = Connection<T>;
 
     fn deref(&self) -> &Connection<T> {
@@ -99,13 +99,13 @@ impl<T: Read + Write + Unpin + fmt::Debug> Deref for Client<T> {
     }
 }
 
-impl<T: Read + Write + Unpin + fmt::Debug> DerefMut for Client<T> {
+impl<T: BufRead + Write + Unpin + fmt::Debug> DerefMut for Client<T> {
     fn deref_mut(&mut self) -> &mut Connection<T> {
         &mut self.conn
     }
 }
 
-impl<T: Read + Write + Unpin + fmt::Debug> Deref for Session<T> {
+impl<T: BufRead + Write + Unpin + fmt::Debug> Deref for Session<T> {
     type Target = Connection<T>;
 
     fn deref(&self) -> &Connection<T> {
@@ -113,7 +113,7 @@ impl<T: Read + Write + Unpin + fmt::Debug> Deref for Session<T> {
     }
 }
 
-impl<T: Read + Write + Unpin + fmt::Debug> DerefMut for Session<T> {
+impl<T: BufRead + Write + Unpin + fmt::Debug> DerefMut for Session<T> {
     fn deref_mut(&mut self) -> &mut Connection<T> {
         &mut self.conn
     }
@@ -161,7 +161,7 @@ pub async fn connect<A: ToSocketAddrs, S: AsRef<str>>(
     Ok(client)
 }
 
-impl<T: Read + Write + Unpin + fmt::Debug + Send> Client<T> {
+impl<T: BufRead + Write + Unpin + fmt::Debug + Send> Client<T> {
     /// This will upgrade an IMAP client from using a regular TCP connection to use TLS.
     ///
     /// The domain parameter is required to perform hostname verification.
@@ -197,7 +197,7 @@ macro_rules! ok_or_unauth_client_err {
     };
 }
 
-impl<T: Read + Write + Unpin + fmt::Debug + Send> Client<T> {
+impl<T: BufRead + Write + Unpin + fmt::Debug + Send> Client<T> {
     /// Creates a new client over the given stream.
     ///
     /// For an example of how to use this method to provide a pure-Rust TLS integration, see the
@@ -376,7 +376,7 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Client<T> {
     }
 }
 
-impl<T: Read + Write + Unpin + fmt::Debug + Send> Session<T> {
+impl<T: BufRead + Write + Unpin + fmt::Debug + Send> Session<T> {
     unsafe_pinned!(conn: Connection<T>);
 
     pub(crate) fn get_stream(self: Pin<&mut Self>) -> Pin<&mut ImapStream<T>> {
@@ -1391,7 +1391,7 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Session<T> {
     }
 }
 
-impl<T: Read + Write + Unpin + fmt::Debug> Connection<T> {
+impl<T: BufRead + Write + Unpin + fmt::Debug> Connection<T> {
     unsafe_pinned!(stream: ImapStream<T>);
 
     /// Convert this connection into the raw underlying stream.
