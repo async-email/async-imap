@@ -16,6 +16,7 @@ use async_std::net::{TcpStream, ToSocketAddrs};
 use async_channel::{self as channel, bounded};
 #[cfg(feature = "runtime-async-std")]
 use async_std::io::{Read, Write, WriteExt};
+use base64::Engine as _;
 use extensions::id::{format_identification, parse_id};
 use extensions::quota::parse_get_quota_root;
 use futures::{io, Stream, StreamExt};
@@ -340,16 +341,20 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Client<T> {
                     Response::Continue { information, .. } => {
                         let challenge = if let Some(text) = information {
                             ok_or_unauth_client_err!(
-                                base64::decode(text.as_ref()).map_err(|e| Error::Parse(
-                                    ParseError::Authentication((*text).to_string(), Some(e))
-                                )),
+                                base64::engine::general_purpose::STANDARD
+                                    .decode(text.as_ref())
+                                    .map_err(|e| Error::Parse(ParseError::Authentication(
+                                        (*text).to_string(),
+                                        Some(e)
+                                    ))),
                                 self
                             )
                         } else {
                             Vec::new()
                         };
                         let raw_response = &mut authenticator.process(&challenge);
-                        let auth_response = base64::encode(raw_response);
+                        let auth_response =
+                            base64::engine::general_purpose::STANDARD.encode(raw_response);
 
                         ok_or_unauth_client_err!(
                             self.conn.run_command_untagged(&auth_response).await,
