@@ -75,15 +75,16 @@ impl<R: Read + Write + Unpin> ImapStream<R> {
 }
 
 impl<R: Read + Write + Unpin> ImapStream<R> {
-    fn maybe_decode(&mut self) -> io::Result<Option<ResponseData>> {
-        if self.buffer.used() >= self.decode_needs {
-            self.decode()
-        } else {
-            Ok(None)
-        }
-    }
-
+    /// Attempts to decode a single response from the buffer.
+    ///
+    /// Returns `None` if the buffer does not contain enough data.
     fn decode(&mut self) -> io::Result<Option<ResponseData>> {
+        if self.buffer.used() < self.decode_needs {
+            // We know that there is not enough data to decode anything
+            // from previous attempts.
+            return Ok(None);
+        }
+
         let block: Block<'static> = self.buffer.take_block();
         // Be aware, now self.buffer is invalid until block is returned or reset!
 
@@ -259,7 +260,7 @@ impl<R: Read + Write + Unpin> Stream for ImapStream<R> {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = &mut *self;
-        if let Some(response) = this.maybe_decode()? {
+        if let Some(response) = this.decode()? {
             return Poll::Ready(Some(Ok(response)));
         }
         loop {
@@ -287,7 +288,7 @@ impl<R: Read + Write + Unpin> Stream for ImapStream<R> {
                 return Poll::Ready(None);
             }
             this.buffer.extend_used(num_bytes_read);
-            if let Some(response) = this.maybe_decode()? {
+            if let Some(response) = this.decode()? {
                 return Poll::Ready(Some(Ok(response)));
             }
         }
