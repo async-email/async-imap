@@ -26,7 +26,9 @@ pub struct ImapStream<R: Read + Write> {
     /// The underlying stream
     pub(crate) inner: R,
     /// Number of bytes the next decode operation needs if known.
-    decode_needs: Option<usize>,
+    /// If the buffer contains less than this, it is a waste of time to try to parse it.
+    /// If unknown, set it to 0, so decoding is always attempted.
+    decode_needs: usize,
     /// The buffer.
     buffer: Buffer,
     /// Whether there is any more items to return from the stream.  This is set to true once
@@ -40,7 +42,7 @@ impl<R: Read + Write + Unpin> ImapStream<R> {
         ImapStream {
             inner,
             buffer: Buffer::new(),
-            decode_needs: None,
+            decode_needs: 0,
             closed: false,
         }
     }
@@ -99,7 +101,7 @@ impl<R: Read + Write + Unpin> ImapStream<R> {
 
 impl<R: Read + Write + Unpin> ImapStream<R> {
     fn maybe_decode(&mut self) -> io::Result<Option<ResponseData>> {
-        if self.buffer.used() > self.decode_needs.unwrap_or(0) {
+        if self.buffer.used() >= self.decode_needs {
             self.decode()
         } else {
             Ok(None)
@@ -116,22 +118,22 @@ impl<R: Read + Write + Unpin> ImapStream<R> {
             match imap_proto::parser::parse_response(buf) {
                 Ok((remaining, response)) => {
                     // TODO: figure out if we can use a minimum required size for a response.
-                    self.decode_needs = None;
+                    self.decode_needs = 0;
                     self.buffer.reset_with_data(remaining);
                     Ok(response)
                 }
                 Err(nom::Err::Incomplete(Needed::Size(min))) => {
                     log::trace!("decode: incomplete data, need minimum {} bytes", min);
-                    self.decode_needs = Some(usize::from(min));
+                    self.decode_needs = self.buffer.used() + usize::from(min);
                     Err(None)
                 }
                 Err(nom::Err::Incomplete(_)) => {
                     log::trace!("decode: incomplete data, need unknown number of bytes");
-                    self.decode_needs = None;
+                    self.decode_needs = 0;
                     Err(None)
                 }
                 Err(other) => {
-                    self.decode_needs = None;
+                    self.decode_needs = 0;
                     Err(Some(io::Error::new(
                         io::ErrorKind::Other,
                         format!("{:?} during parsing of {:?}", other, buf),
@@ -197,9 +199,9 @@ impl Buffer {
     }
 
     /// Ensure the buffer has free capacity, optionally ensuring minimum buffer size.
-    fn ensure_capacity(&mut self, required: Option<usize>) -> io::Result<()> {
+    fn ensure_capacity(&mut self, required: usize) -> io::Result<()> {
         let free_bytes: usize = self.block.size() - self.offset;
-        let min_required_bytes: usize = required.unwrap_or(0);
+        let min_required_bytes: usize = required;
         let extra_bytes_needed: usize = min_required_bytes.saturating_sub(self.block.size());
         if free_bytes == 0 || extra_bytes_needed > 0 {
             let increase = std::cmp::max(Buffer::BLOCK_SIZE, extra_bytes_needed);
@@ -384,7 +386,7 @@ mod tests {
         assert_eq!(buf.block.size(), Buffer::BLOCK_SIZE);
 
         // Still has capacity, no size request.
-        buf.ensure_capacity(None).unwrap();
+        buf.ensure_capacity(0).unwrap();
         assert_eq!(buf.free_as_mut_slice().len(), 1);
         assert_eq!(buf.block.size(), Buffer::BLOCK_SIZE);
 
@@ -394,15 +396,14 @@ mod tests {
         assert_eq!(buf.block.size(), Buffer::BLOCK_SIZE);
 
         // No capacity, no size request.
-        buf.ensure_capacity(None).unwrap();
+        buf.ensure_capacity(0).unwrap();
         assert_eq!(buf.free_as_mut_slice().len(), Buffer::BLOCK_SIZE);
         assert_eq!(buf.block.size(), 2 * Buffer::BLOCK_SIZE);
 
         // Some capacity, size request.
         buf.extend_used(5);
         assert_eq!(buf.offset, Buffer::BLOCK_SIZE + 5);
-        buf.ensure_capacity(Some(3 * Buffer::BLOCK_SIZE - 6))
-            .unwrap();
+        buf.ensure_capacity(3 * Buffer::BLOCK_SIZE - 6).unwrap();
         assert_eq!(buf.free_as_mut_slice().len(), 2 * Buffer::BLOCK_SIZE - 5);
         assert_eq!(buf.block.size(), 3 * Buffer::BLOCK_SIZE);
     }
