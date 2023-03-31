@@ -1,12 +1,12 @@
 use std::fmt;
 
-use byte_pool::Block;
+use bytes::BytesMut;
 use imap_proto::{RequestId, Response};
 use self_cell::self_cell;
 
 self_cell!(
     pub struct ResponseData {
-        owner: Block<'static>,
+        owner: BytesMut,
 
         #[covariant]
         dependent: Response,
