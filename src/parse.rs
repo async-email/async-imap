@@ -369,12 +369,12 @@ pub(crate) async fn handle_unilateral(
 mod tests {
     use super::*;
     use async_channel::bounded;
+    use bytes::BytesMut;
 
     fn input_stream(data: &[&str]) -> Vec<io::Result<ResponseData>> {
         data.iter()
             .map(|line| {
-                let mut block = crate::imap_stream::POOL.alloc(line.as_bytes().len());
-                block.copy_from_slice(line.as_bytes());
+                let block = BytesMut::from(line.as_bytes());
                 ResponseData::try_new(block, |bytes| -> io::Result<_> {
                     let (remaining, response) = imap_proto::parser::parse_response(bytes).unwrap();
                     assert_eq!(remaining.len(), 0);
