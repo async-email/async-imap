@@ -48,12 +48,6 @@ impl<R: Read + Write + Unpin> ImapStream<R> {
     }
 
     pub async fn encode(&mut self, msg: Request) -> Result<(), io::Error> {
-        if self.closed {
-            return Err(io::Error::new(
-                io::ErrorKind::BrokenPipe,
-                "inner stream closed",
-            ));
-        }
         log::trace!(
             "encode: input: {:?}, {:?}",
             msg.0,
