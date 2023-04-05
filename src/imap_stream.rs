@@ -278,6 +278,13 @@ impl<R: Read + Write + Unpin> Stream for ImapStream<R> {
             this.buffer.ensure_capacity(this.decode_needs)?;
             let buf = this.buffer.free_as_mut_slice();
 
+            // The buffer should have at least one byte free
+            // before we try reading into it
+            // so we can treat 0 bytes read as EOF.
+            // This is guaranteed by `ensure_capacity()` above
+            // even if it is called with 0 as an argument.
+            debug_assert!(!buf.is_empty());
+
             #[cfg(feature = "runtime-async-std")]
             let num_bytes_read = ready!(Pin::new(&mut this.inner).poll_read(cx, buf))?;
 
