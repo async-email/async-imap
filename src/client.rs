@@ -2211,4 +2211,92 @@ mod tests {
         }
         panic!("No error");
     }
+
+    /// Emulates a server responding to `FETCH` requests
+    /// with a body of 76 bytes of headers and N 74-byte lines,
+    /// where N is the requested message sequence number.
+    #[cfg(feature = "runtime-tokio")]
+    async fn handle_client(stream: tokio::io::DuplexStream) -> Result<()> {
+        use tokio::io::AsyncBufReadExt;
+
+        let (reader, mut writer) = tokio::io::split(stream);
+        let reader = tokio::io::BufReader::new(reader);
+
+        let mut lines = reader.lines();
+        while let Some(line) = lines.next_line().await? {
+            let (request_id, request) = line.split_once(' ').unwrap();
+            eprintln!("Received request {request_id}.");
+
+            let (id, _) = request
+                .strip_prefix("FETCH ")
+                .unwrap()
+                .split_once(' ')
+                .unwrap();
+            let id = id.parse().unwrap();
+
+            let mut body = concat!(
+                "From: Bob <bob@example.com>\r\n",
+                "To: Alice <alice@example.org>\r\n",
+                "Subject: Test\r\n",
+                "Message-Id: <foobar@example.com>\r\n",
+                "Date: Sun, 22 Mar 2020 00:00:00 +0100\r\n",
+                "\r\n",
+            )
+            .to_string();
+            for _ in 1..id {
+                body +=
+                    "012345678901234567890123456789012345678901234567890123456789012345678901\r\n";
+            }
+            let body_len = body.len();
+
+            let response = format!("* {id} FETCH (RFC822.SIZE {body_len} BODY[] {{{body_len}}}\r\n{body} FLAGS (\\Seen))\r\n");
+            writer.write_all(response.as_bytes()).await?;
+            writer
+                .write_all(format!("{request_id} OK FETCH completed\r\n").as_bytes())
+                .await?;
+            writer.flush().await?;
+        }
+
+        Ok(())
+    }
+
+    /// Test requestng 1000 messages each larger than a previous one.
+    ///
+    /// This is a regression test for v0.6.0 async-imap,
+    /// which sometimes failed to allocate free buffer space,
+    /// read into a buffer of zero size and erroneously detected it
+    /// as the end of stream.
+    #[cfg(feature = "runtime-tokio")]
+    #[cfg_attr(
+        feature = "runtime-tokio",
+        tokio::test(flavor = "multi_thread", worker_threads = 2)
+    )]
+    async fn large_fetch() -> Result<()> {
+        use futures::TryStreamExt;
+
+        let (client, server) = tokio::io::duplex(4096);
+        tokio::spawn(handle_client(server));
+
+        let client = crate::Client::new(client);
+        let mut imap_session = Session::new(client.conn);
+
+        for i in 200..300 {
+            eprintln!("Fetching {i}.");
+            let mut messages_stream = imap_session
+                .fetch(format!("{i}"), "(RFC822.SIZE BODY.PEEK[] FLAGS)")
+                .await?;
+            let fetch = messages_stream
+                .try_next()
+                .await?
+                .expect("no FETCH returned");
+            let body = fetch.body().expect("message did not have a body!");
+            assert_eq!(body.len(), 76 + 74 * i);
+
+            let no_fetch = messages_stream.try_next().await?;
+            assert!(no_fetch.is_none());
+            drop(messages_stream);
+        }
+
+        Ok(())
+    }
 }
