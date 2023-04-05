@@ -185,6 +185,9 @@ impl Buffer {
             let increase = std::cmp::max(Buffer::BLOCK_SIZE, extra_bytes_needed);
             self.grow(increase)?;
         }
+
+        // Assert that the buffer at least one free byte.
+        debug_assert!(self.offset < self.block.size());
         Ok(())
     }
 
@@ -392,6 +395,35 @@ mod tests {
         buf.ensure_capacity(3 * Buffer::BLOCK_SIZE - 6).unwrap();
         assert_eq!(buf.free_as_mut_slice().len(), 2 * Buffer::BLOCK_SIZE - 5);
         assert_eq!(buf.block.size(), 3 * Buffer::BLOCK_SIZE);
+    }
+
+    /// Regression test for a bug in ensure_capacity() caused
+    /// by a bug in byte-pool crate 0.2.2 dependency.
+    ///
+    /// ensure_capacity() sometimes did not ensure that
+    /// at least one byte is available, which in turn
+    /// resulted in attempt to read into a buffer of zero size.
+    /// When poll_read() reads into a buffer of zero size,
+    /// it can only read zero bytes, which is indistinguishable
+    /// from EOF and resulted in an erroneous detection of EOF
+    /// when in fact the stream was not closed.
+    #[test]
+    fn test_ensure_capacity_loop() {
+        let mut buf = Buffer::new();
+
+        for i in 1..500 {
+            // Ask for `i` bytes.
+            buf.ensure_capacity(i).unwrap();
+
+            // Test that we can read at least as much as requested.
+            let free = buf.free_as_mut_slice();
+            let used = free.len();
+            assert!(used >= i);
+            drop(free);
+
+            // Use as much as allowed.
+            buf.extend_used(used);
+        }
     }
 
     #[test]
