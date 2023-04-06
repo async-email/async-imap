@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Do not generate artificial "broken pipe" errors when attempting to send a request
   after reaching EOF on the response stream. #73
+- Do not attempt to track if the stream is closed or not.
+  `ImapStream` can wrap any kinds of streams, including streams which may become open again later,
+  like files which can be rewinded after reaching end of file or appended to.
 
 ## [0.7.0] - 2023-04-03
 

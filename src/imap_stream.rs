@@ -31,9 +31,6 @@ pub struct ImapStream<R: Read + Write> {
     decode_needs: usize,
     /// The buffer.
     buffer: Buffer,
-    /// Whether there is any more items to return from the stream.  This is set to true once
-    /// all decodable data in the buffer is returned and the underlying stream is closed.
-    closed: bool,
 }
 
 impl<R: Read + Write + Unpin> ImapStream<R> {
@@ -43,7 +40,6 @@ impl<R: Read + Write + Unpin> ImapStream<R> {
             inner,
             buffer: Buffer::new(),
             decode_needs: 0,
-            closed: false,
         }
     }
 
@@ -75,21 +71,6 @@ impl<R: Read + Write + Unpin> ImapStream<R> {
 
     pub fn as_mut(&mut self) -> &mut R {
         &mut self.inner
-    }
-
-    /// End-Of-File return value.
-    ///
-    /// Return the appropriate EOF value for the stream depending on whether there is still
-    /// data in the buffer.  It is assumed that any remaining data in the buffer can not be
-    /// decoded.
-    fn stream_eof_value(&self) -> Option<io::Result<ResponseData>> {
-        match self.buffer.used() {
-            0 => None,
-            _ => Some(Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "bytes remaining in stream",
-            ))),
-        }
     }
 }
 
@@ -281,9 +262,6 @@ impl<R: Read + Write + Unpin> Stream for ImapStream<R> {
         if let Some(response) = this.maybe_decode()? {
             return Poll::Ready(Some(Ok(response)));
         }
-        if this.closed {
-            return Poll::Ready(this.stream_eof_value());
-        }
         loop {
             this.buffer.ensure_capacity(this.decode_needs)?;
             let buf = this.buffer.free_as_mut_slice();
@@ -300,8 +278,13 @@ impl<R: Read + Write + Unpin> Stream for ImapStream<R> {
             };
 
             if num_bytes_read == 0 {
-                this.closed = true;
-                return Poll::Ready(this.stream_eof_value());
+                if this.buffer.used() > 0 {
+                    return Poll::Ready(Some(Err(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "bytes remaining in stream",
+                    ))));
+                }
+                return Poll::Ready(None);
             }
             this.buffer.extend_used(num_bytes_read);
             if let Some(response) = this.maybe_decode()? {
