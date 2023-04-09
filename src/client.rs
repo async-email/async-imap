@@ -81,7 +81,6 @@ pub struct Client<T: Read + Write + Unpin + fmt::Debug> {
 /// The underlying primitives type. Both `Client`(unauthenticated) and `Session`(after succesful
 /// login) use a `Connection` internally for the TCP stream primitives.
 #[derive(Debug)]
-#[doc(hidden)]
 pub struct Connection<T: Read + Write + Unpin + fmt::Debug> {
     pub(crate) stream: ImapStream<T>,
 
@@ -393,7 +392,7 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Session<T> {
         }
     }
 
-    /// Selects a mailbox
+    /// Selects a mailbox.
     ///
     /// The `SELECT` command selects a mailbox so that messages in the mailbox can be accessed.
     /// Note that earlier versions of this protocol only required the FLAGS, EXISTS, and RECENT
@@ -407,10 +406,9 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Session<T> {
     ///
     /// Note that the server *is* allowed to unilaterally send things to the client for messages in
     /// a selected mailbox whose status has changed. See the note on [unilateral server responses
-    /// in RFC 3501](https://tools.ietf.org/html/rfc3501#section-7). This means that if you use
-    /// [`Connection::run_command_and_read_response`], you *may* see additional untagged `RECENT`,
-    /// `EXISTS`, `FETCH`, and `EXPUNGE` responses. You can get them from the
-    /// `unsolicited_responses` channel of the [`Session`](struct.Session.html).
+    /// in RFC 3501](https://tools.ietf.org/html/rfc3501#section-7). This means that if run commands,
+    /// you *may* see additional untagged `RECENT`, `EXISTS`, `FETCH`, and `EXPUNGE` responses.
+    /// You can get them from the `unsolicited_responses` channel of the [`Session`](struct.Session.html).
     pub async fn select<S: AsRef<str>>(&mut self, mailbox_name: S) -> Result<Mailbox> {
         // TODO: also note READ/WRITE vs READ-only mode!
         let id = self
@@ -426,8 +424,8 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Session<T> {
         Ok(mbox)
     }
 
-    /// Selects a mailbox with `(CONDSTORE)` parameter as defined in [RFC
-    /// 7162](https://www.rfc-editor.org/rfc/rfc7162.html#section-3.1.8).
+    /// Selects a mailbox with `(CONDSTORE)` parameter as defined in
+    /// [RFC 7162](https://www.rfc-editor.org/rfc/rfc7162.html#section-3.1.8).
     pub async fn select_condstore<S: AsRef<str>>(&mut self, mailbox_name: S) -> Result<Mailbox> {
         let id = self
             .run_command(&format!(

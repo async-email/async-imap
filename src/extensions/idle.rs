@@ -34,7 +34,7 @@ use crate::types::ResponseData;
 /// Note that the server MAY consider a client inactive if it has an IDLE command running, and if
 /// such a server has an inactivity timeout it MAY log the client off implicitly at the end of its
 /// timeout period.  Because of that, clients using IDLE are advised to terminate the IDLE and
-/// re-issue it at least every 29 minutes to avoid being logged off. [`Handle::wait_keepalive`]
+/// re-issue it at least every 29 minutes to avoid being logged off. [`Handle::wait`]
 /// does this. This still allows a client to receive immediate mailbox updates even though it need
 /// only "poll" at half hour intervals.
 ///
@@ -55,7 +55,7 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Stream for Handle<T> {
     }
 }
 
-/// A stream of server responses after sending `IDLE`. Created using [Handle::stream].
+/// A stream of server responses after sending `IDLE`.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless polled"]
 pub struct IdleStream<'a, St> {
@@ -112,8 +112,8 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Handle<T> {
         Handle { session, id: None }
     }
 
-    /// Start listening to the server side resonses.
-    /// Must be called after [Handle::init].
+    /// Start listening to the server side responses.
+    /// Must be called after [`Handle::init`].
     pub fn wait(
         &mut self,
     ) -> (

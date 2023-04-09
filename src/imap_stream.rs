@@ -161,11 +161,13 @@ impl Buffer {
 
     /// Indicate how many new bytes were written into the buffer.
     ///
-    /// When new bytes are written into the slice returned by [tail_as_slice] this method
+    /// When new bytes are written into the slice returned by [`free_as_mut_slice`] this method
     /// should be called to extend the used portion of the buffer to include the new data.
     ///
     /// You can not write past the end of the buffer, so extending more then there is free
     /// space marks the entire buffer as used.
+    ///
+    /// [`free_as_mut_slice`]: Self::free_as_mut_slice
     // aka advance()?
     fn extend_used(&mut self, num_bytes: usize) {
         self.offset += num_bytes;
@@ -189,9 +191,12 @@ impl Buffer {
     /// Grows the buffer, ensuring there are free bytes in the tail.
     ///
     /// The specified number of bytes is only a minimum.  The buffer could grow by more as
-    /// it will always grow in multiples of [BLOCK_SIZE].
+    /// it will always grow in multiples of [`BLOCK_SIZE`].
     ///
-    /// If the size would be larger than [MAX_CAPACITY] an error is returned.
+    /// If the size would be larger than [`MAX_CAPACITY`] an error is returned.
+    ///
+    /// [`BLOCK_SIZE`]: Self::BLOCK_SIZE
+    /// [`MAX_CAPACITY`]: Self::MAX_CAPACITY
     // TODO: This bypasses the byte-pool block re-use.  That's bad.
     fn grow(&mut self, num_bytes: usize) -> io::Result<()> {
         let min_size = self.block.size() + num_bytes;
@@ -212,8 +217,11 @@ impl Buffer {
 
     /// Return the block backing the buffer.
     ///
-    /// Next you *must* either return this block using [return_block] or call
-    /// [reset_with_data].
+    /// Next you *must* either return this block using [`return_block`] or call
+    /// [`reset_with_data`].
+    ///
+    /// [`return_block`]: Self::return_block
+    /// [`reset_with_data`]: Self::reset_with_data
     // TODO: Enforce this with typestate.
     fn take_block(&mut self) -> Block<'static> {
         std::mem::replace(&mut self.block, POOL.alloc(Self::BLOCK_SIZE))
@@ -221,7 +229,7 @@ impl Buffer {
 
     /// Reset the buffer to be a new allocation with given data copied in.
     ///
-    /// This allows the previously returned block from [get_block] to be used in and owned
+    /// This allows the previously returned block from `get_block` to be used in and owned
     /// by the [ResponseData].
     ///
     /// This does not do any bounds checking to see if the new buffer would exceed the
