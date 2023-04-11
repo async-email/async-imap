@@ -1,15 +1,15 @@
 use std::env;
 use std::time::Duration;
 
-use async_imap::error::{Error, Result};
+use anyhow::{bail, Result};
 use async_imap::extensions::idle::IdleResponse::*;
 use futures::StreamExt;
 
 #[cfg(feature = "runtime-async-std")]
-use async_std::{task, task::sleep};
+use async_std::{net::TcpStream, task, task::sleep};
 
 #[cfg(feature = "runtime-tokio")]
-use tokio::{task, time::sleep};
+use tokio::{net::TcpStream, task, time::sleep};
 
 #[cfg_attr(feature = "runtime-tokio", tokio::main)]
 #[cfg_attr(feature = "runtime-async-std", async_std::main)]
@@ -17,7 +17,7 @@ async fn main() -> Result<()> {
     let args: Vec<String> = env::args().collect();
     if args.len() != 4 {
         eprintln!("need three arguments: imap-server login password");
-        Err(Error::Bad("need three arguments".into()))
+        bail!("need three arguments");
     } else {
         fetch_and_idle(&args[1], &args[2], &args[3]).await?;
         Ok(())
@@ -25,12 +25,12 @@ async fn main() -> Result<()> {
 }
 
 async fn fetch_and_idle(imap_server: &str, login: &str, password: &str) -> Result<()> {
-    let tls = async_native_tls::TlsConnector::new();
     let imap_addr = (imap_server, 993);
+    let tcp_stream = TcpStream::connect(imap_addr).await?;
+    let tls = async_native_tls::TlsConnector::new();
+    let tls_stream = tls.connect(imap_server, tcp_stream).await?;
 
-    // we pass in the imap_server twice to check that the server's TLS
-    // certificate is valid for the imap_server we're connecting to.
-    let client = async_imap::connect(imap_addr, imap_server, tls).await?;
+    let client = async_imap::Client::new(tls_stream);
     println!("-- connected to {}:{}", imap_addr.0, imap_addr.1);
 
     // the client we have here is unauthenticated.
