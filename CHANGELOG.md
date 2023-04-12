@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ImapStream` can wrap any kinds of streams, including streams which may become open again later,
   like files which can be rewinded after reaching end of file or appended to.
 
+### Fixes
+
+- Update byte-pool to 0.2.4 to fix `ensure_capacity()`.
+  Previously this bug could have resulted in an attempt to read into a buffer of zero size
+  and erronous detection of the end of stream.
+
 ## [0.7.0] - 2023-04-03
 
 ### Added
