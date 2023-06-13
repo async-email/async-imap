@@ -426,7 +426,6 @@ mod tests {
             let free = buf.free_as_mut_slice();
             let used = free.len();
             assert!(used >= i);
-            drop(free);
 
             // Use as much as allowed.
             buf.extend_used(used);
