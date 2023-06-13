@@ -2,14 +2,16 @@ use std::fmt;
 
 use byte_pool::Block;
 use imap_proto::{RequestId, Response};
+use self_cell::self_cell;
 
-#[ouroboros::self_referencing(pub_extras)]
-pub struct ResponseData {
-    pub raw: Block<'static>,
-    #[borrows(raw)]
-    #[covariant]
-    response: Response<'this>,
-}
+self_cell!(
+    pub struct ResponseData {
+        owner: Block<'static>,
+
+        #[covariant]
+        dependent: Response,
+    }
+);
 
 impl std::cmp::PartialEq for ResponseData {
     fn eq(&self, other: &Self) -> bool {
@@ -22,21 +24,21 @@ impl std::cmp::Eq for ResponseData {}
 impl fmt::Debug for ResponseData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ResponseData")
-            .field("raw", &self.borrow_raw().len())
-            .field("response", self.borrow_response())
+            .field("raw", &self.borrow_owner().len())
+            .field("response", self.borrow_dependent())
             .finish()
     }
 }
 
 impl ResponseData {
     pub fn request_id(&self) -> Option<&RequestId> {
-        match self.borrow_response() {
+        match self.borrow_dependent() {
             Response::Done { ref tag, .. } => Some(tag),
             _ => None,
         }
     }
 
     pub fn parsed(&self) -> &Response<'_> {
-        self.borrow_response()
+        self.borrow_dependent()
     }
 }

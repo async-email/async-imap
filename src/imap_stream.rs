@@ -119,8 +119,8 @@ impl<R: Read + Write + Unpin> ImapStream<R> {
         });
         match res {
             Ok(response) => Ok(Some(response)),
-            Err((err, heads)) => {
-                self.buffer.return_block(heads.raw);
+            Err((heads, err)) => {
+                self.buffer.return_block(heads);
                 match err {
                     Some(err) => Err(err),
                     None => Ok(None),

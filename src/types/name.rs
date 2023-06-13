@@ -1,17 +1,20 @@
 pub use imap_proto::types::NameAttribute;
 use imap_proto::{MailboxDatum, Response};
+use self_cell::self_cell;
 
 use crate::types::ResponseData;
 
-/// A name that matches a `LIST` or `LSUB` command.
-#[ouroboros::self_referencing(pub_extras)]
-#[derive(Debug)]
-pub struct Name {
-    response: Box<ResponseData>,
-    #[borrows(response)]
-    #[covariant]
-    inner: InnerName<'this>,
-}
+self_cell!(
+    /// A name that matches a `LIST` or `LSUB` command.
+    pub struct Name {
+        owner: Box<ResponseData>,
+
+        #[covariant]
+        dependent: InnerName,
+    }
+
+    impl { Debug }
+);
 
 #[derive(PartialEq, Eq, Debug)]
 pub struct InnerName<'a> {
@@ -38,7 +41,7 @@ impl Name {
 
     /// Attributes of this name.
     pub fn attributes(&self) -> &[NameAttribute<'_>] {
-        &self.borrow_inner().attributes[..]
+        &self.borrow_dependent().attributes[..]
     }
 
     /// The hierarchy delimiter is a character used to delimit levels of hierarchy in a mailbox
@@ -46,7 +49,7 @@ impl Name {
     /// of naming hierarchy.  All children of a top-level hierarchy node use the same
     /// separator character.  `None` means that no hierarchy exists; the name is a "flat" name.
     pub fn delimiter(&self) -> Option<&str> {
-        self.borrow_inner().delimiter
+        self.borrow_dependent().delimiter
     }
 
     /// The name represents an unambiguous left-to-right hierarchy, and are valid for use as a
@@ -54,6 +57,6 @@ impl Name {
     /// the name is also valid as an argument for commands, such as `SELECT`, that accept mailbox
     /// names.
     pub fn name(&self) -> &str {
-        self.borrow_inner().name
+        self.borrow_dependent().name
     }
 }
