@@ -7,7 +7,7 @@ repository = "https://github.com/async-email/async-imap"
 homepage = "https://github.com/async-email/async-imap"
 description = "Async IMAP client for Rust"
 readme = "README.md"
-license = "Apache-2.0/MIT"
+license = "MIT OR Apache-2.0"
 edition = "2021"
 
 keywords = ["email", "imap"]
