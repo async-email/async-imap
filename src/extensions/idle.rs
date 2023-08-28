@@ -134,7 +134,9 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Handle<T> {
             while let Some(Ok(resp)) = interruptible_stream.next().await {
                 let resp = resp?;
                 match resp.parsed() {
-                    Response::Data { status, .. } if status == &Status::Ok => {
+                    Response::Data {
+                        status: Status::Ok, ..
+                    } => {
                         // all good continue
                     }
                     Response::Continue { .. } => {
