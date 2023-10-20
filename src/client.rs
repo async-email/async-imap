@@ -2228,17 +2228,54 @@ mod tests {
     #[cfg_attr(feature = "runtime-tokio", tokio::test)]
     #[cfg_attr(feature = "runtime-async-std", async_std::test)]
     async fn status() {
-        let response = b"* STATUS INBOX (UIDNEXT 25)\r\n\
-            A0001 OK [CLIENTBUG] Status on selected mailbox completed (0.001 + 0.000 secs).\r\n"
-            .to_vec();
+        {
+            let response = b"* STATUS INBOX (UIDNEXT 25)\r\n\
+                A0001 OK [CLIENTBUG] Status on selected mailbox completed (0.001 + 0.000 secs).\r\n"
+                .to_vec();
 
-        let mock_stream = MockStream::new(response);
-        let mut session = mock_session!(mock_stream);
-        let status = session.status("INBOX", "(UIDNEXT)").await.unwrap();
-        assert_eq!(
-            session.stream.inner.written_buf,
-            b"A0001 STATUS \"INBOX\" (UIDNEXT)\r\n".to_vec()
-        );
-        assert_eq!(status.uid_next, Some(25));
+            let mock_stream = MockStream::new(response);
+            let mut session = mock_session!(mock_stream);
+            let status = session.status("INBOX", "(UIDNEXT)").await.unwrap();
+            assert_eq!(
+                session.stream.inner.written_buf,
+                b"A0001 STATUS \"INBOX\" (UIDNEXT)\r\n".to_vec()
+            );
+            assert_eq!(status.uid_next, Some(25));
+        }
+
+        {
+            let response = b"* STATUS INBOX (RECENT 15)\r\n\
+                A0001 OK STATUS completed\r\n"
+                .to_vec();
+
+            let mock_stream = MockStream::new(response);
+            let mut session = mock_session!(mock_stream);
+            let status = session.status("INBOX", "(RECENT)").await.unwrap();
+            assert_eq!(
+                session.stream.inner.written_buf,
+                b"A0001 STATUS \"INBOX\" (RECENT)\r\n".to_vec()
+            );
+            assert_eq!(status.recent, 15);
+        }
+
+        {
+            // Example from RFC 3501.
+            let response = b"* STATUS blurdybloop (MESSAGES 231 UIDNEXT 44292)\r\n\
+                A0001 OK STATUS completed\r\n"
+                .to_vec();
+
+            let mock_stream = MockStream::new(response);
+            let mut session = mock_session!(mock_stream);
+            let status = session
+                .status("blurdybloop", "(UIDNEXT MESSAGES)")
+                .await
+                .unwrap();
+            assert_eq!(
+                session.stream.inner.written_buf,
+                b"A0001 STATUS \"blurdybloop\" (UIDNEXT MESSAGES)\r\n".to_vec()
+            );
+            assert_eq!(status.uid_next, Some(44292));
+            assert_eq!(status.exists, 231);
+        }
     }
 }
