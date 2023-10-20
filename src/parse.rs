@@ -88,6 +88,80 @@ pub(crate) fn parse_fetches<T: Stream<Item = io::Result<ResponseData>> + Unpin +
     )
 }
 
+pub(crate) async fn parse_status<T: Stream<Item = io::Result<ResponseData>> + Unpin + Send>(
+    stream: &mut T,
+    expected_mailbox: &str,
+    unsolicited: channel::Sender<UnsolicitedResponse>,
+    command_tag: RequestId,
+) -> Result<Mailbox> {
+    let mut mbox = Mailbox::default();
+
+    while let Some(resp) = stream.next().await {
+        let resp = resp?;
+        match resp.parsed() {
+            Response::Done {
+                tag,
+                status,
+                code,
+                information,
+                ..
+            } if tag == &command_tag => {
+                use imap_proto::Status;
+                match status {
+                    Status::Ok => {
+                        break;
+                    }
+                    Status::Bad => {
+                        return Err(Error::Bad(format!(
+                            "code: {:?}, info: {:?}",
+                            code, information
+                        )))
+                    }
+                    Status::No => {
+                        return Err(Error::No(format!(
+                            "code: {:?}, info: {:?}",
+                            code, information
+                        )))
+                    }
+                    _ => {
+                        return Err(Error::Io(io::Error::new(
+                            io::ErrorKind::Other,
+                            format!(
+                                "status: {:?}, code: {:?}, information: {:?}",
+                                status, code, information
+                            ),
+                        )));
+                    }
+                }
+            }
+            Response::MailboxData(MailboxDatum::Status { mailbox, status })
+                if mailbox == expected_mailbox =>
+            {
+                for attribute in status {
+                    match attribute {
+                        StatusAttribute::HighestModSeq(highest_modseq) => {
+                            mbox.highest_modseq = Some(*highest_modseq)
+                        }
+                        StatusAttribute::Messages(exists) => mbox.exists = *exists,
+                        StatusAttribute::Recent(recent) => mbox.recent = *recent,
+                        StatusAttribute::UidNext(uid_next) => mbox.uid_next = Some(*uid_next),
+                        StatusAttribute::UidValidity(uid_validity) => {
+                            mbox.uid_validity = Some(*uid_validity)
+                        }
+                        StatusAttribute::Unseen(unseen) => mbox.unseen = Some(*unseen),
+                        _ => {}
+                    }
+                }
+            }
+            _ => {
+                handle_unilateral(resp, unsolicited.clone()).await;
+            }
+        }
+    }
+
+    Ok(mbox)
+}
+
 pub(crate) fn parse_expunge<T: Stream<Item = io::Result<ResponseData>> + Unpin + Send>(
     stream: &mut T,
     unsolicited: channel::Sender<UnsolicitedResponse>,

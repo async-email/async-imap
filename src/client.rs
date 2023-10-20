@@ -1063,8 +1063,9 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Session<T> {
                 data_items.as_ref()
             ))
             .await?;
-        let mbox = parse_mailbox(
+        let mbox = parse_status(
             &mut self.conn.stream,
+            mailbox_name.as_ref(),
             self.unsolicited_responses_tx.clone(),
             id,
         )
@@ -2222,5 +2223,22 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    #[cfg_attr(feature = "runtime-tokio", tokio::test)]
+    #[cfg_attr(feature = "runtime-async-std", async_std::test)]
+    async fn status() {
+        let response = b"* STATUS INBOX (UIDNEXT 25)\r\n\
+            A0001 OK [CLIENTBUG] Status on selected mailbox completed (0.001 + 0.000 secs).\r\n"
+            .to_vec();
+
+        let mock_stream = MockStream::new(response);
+        let mut session = mock_session!(mock_stream);
+        let status = session.status("INBOX", "(UIDNEXT)").await.unwrap();
+        assert_eq!(
+            session.stream.inner.written_buf,
+            b"A0001 STATUS \"INBOX\" (UIDNEXT)\r\n".to_vec()
+        );
+        assert_eq!(status.uid_next, Some(25));
     }
 }
