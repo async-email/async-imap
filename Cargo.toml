@@ -37,7 +37,7 @@ bytes = "1"
 once_cell = "1.8.0"
 log = "0.4.8"
 thiserror = "1.0.9"
-async-channel = "1.6.1"
+async-channel = "2.0.0"
 
 async-std = { version = "1.8.0", default-features = false, features = ["std", "unstable"], optional = true }
 tokio = { version = "1", features = ["net", "sync", "time", "io-util"], optional = true }
