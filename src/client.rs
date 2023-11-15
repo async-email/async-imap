@@ -2060,6 +2060,35 @@ mod tests {
         .await;
     }
 
+    #[cfg_attr(feature = "runtime-tokio", tokio::test)]
+    #[cfg_attr(feature = "runtime-async-std", async_std::test)]
+    async fn fetch_unexpected_eof() {
+        // Connection is lost, there will never be any response.
+        let response = b"".to_vec();
+
+        let mock_stream = MockStream::new(response);
+        let mut session = mock_session!(mock_stream);
+
+        {
+            let mut fetch_result = session
+                .uid_fetch("1:*", "(FLAGS BODY.PEEK[])")
+                .await
+                .unwrap();
+
+            // Unexpected EOF.
+            let err = fetch_result.next().await.unwrap().unwrap_err();
+            let Error::Io(io_err) = err else {
+                panic!("Unexpected error type: {err}")
+            };
+            assert_eq!(io_err.kind(), io::ErrorKind::UnexpectedEof);
+        }
+
+        assert_eq!(
+            session.stream.inner.written_buf,
+            b"A0001 UID FETCH 1:* (FLAGS BODY.PEEK[])\r\n".to_vec()
+        );
+    }
+
     async fn generic_fetch<'a, F, T, K>(prefix: &'a str, op: F)
     where
         F: 'a + FnOnce(Arc<Mutex<Session<MockStream>>>, &'a str, &'a str) -> K,
