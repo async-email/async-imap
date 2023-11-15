@@ -1981,7 +1981,7 @@ mod tests {
         K: 'a + Future<Output = Result<T>>,
     {
         generic_with_uid(
-            "OK COPY completed\r\n",
+            "A0001 OK COPY completed\r\n",
             "COPY",
             "2:4",
             "MEETING",
@@ -2094,7 +2094,15 @@ mod tests {
         F: 'a + FnOnce(Arc<Mutex<Session<MockStream>>>, &'a str, &'a str) -> K,
         K: 'a + Future<Output = Result<T>>,
     {
-        generic_with_uid("OK FETCH completed\r\n", "FETCH", "1", "BODY[]", prefix, op).await;
+        generic_with_uid(
+            "A0001 OK FETCH completed\r\n",
+            "FETCH",
+            "1",
+            "BODY[]",
+            prefix,
+            op,
+        )
+        .await;
     }
 
     async fn generic_with_uid<'a, F, T, K>(
@@ -2108,7 +2116,7 @@ mod tests {
         F: 'a + FnOnce(Arc<Mutex<Session<MockStream>>>, &'a str, &'a str) -> K,
         K: 'a + Future<Output = Result<T>>,
     {
-        let resp = format!("A0001 {}\r\n", res).as_bytes().to_vec();
+        let resp = res.as_bytes().to_vec();
         let line = format!("A0001{}{} {} {}\r\n", prefix, cmd, seq, query);
         let session = Arc::new(Mutex::new(mock_session!(MockStream::new(resp))));
 
