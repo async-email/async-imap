@@ -55,7 +55,10 @@ pub(crate) fn filter_sync(res: &io::Result<ResponseData>, command_tag: &RequestI
             Response::Done { tag, .. } => tag != command_tag,
             _ => true,
         },
-        Err(_err) => false,
+        Err(_err) => {
+            // Do not filter out the errors such as unexpected EOF.
+            true
+        }
     }
 }
 
