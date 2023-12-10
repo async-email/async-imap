@@ -120,10 +120,27 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Handle<T> {
         impl Future<Output = Result<IdleResponse>> + '_,
         stop_token::StopSource,
     ) {
+        self.wait_with_timeout(Duration::from_secs(24 * 60 * 60))
+    }
+
+    /// Start listening to the server side responses.
+    ///
+    /// Stops after the passed in `timeout` without any response from the server.
+    /// Timeout is reset by any response, including `* OK Still here` keepalives.
+    ///
+    /// Must be called after [Handle::init].
+    pub fn wait_with_timeout(
+        &mut self,
+        dur: Duration,
+    ) -> (
+        impl Future<Output = Result<IdleResponse>> + '_,
+        stop_token::StopSource,
+    ) {
         assert!(
             self.id.is_some(),
             "Cannot listen to response without starting IDLE"
         );
+
         let sender = self.session.unsolicited_responses_tx.clone();
 
         let interrupt = stop_token::StopSource::new();
@@ -131,7 +148,15 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Handle<T> {
         let mut interruptible_stream = raw_stream.timeout_at(interrupt.token());
 
         let fut = async move {
-            while let Some(Ok(resp)) = interruptible_stream.next().await {
+            loop {
+                let Ok(res) = timeout(dur, interruptible_stream.next()).await else {
+                    return Ok(IdleResponse::Timeout);
+                };
+
+                let Some(Ok(resp)) = res else {
+                    return Ok(IdleResponse::ManualInterrupt);
+                };
+
                 let resp = resp?;
                 match resp.parsed() {
                     Response::Data {
@@ -147,33 +172,6 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Handle<T> {
                     }
                     _ => return Ok(IdleResponse::NewData(resp)),
                 }
-            }
-
-            Ok(IdleResponse::ManualInterrupt)
-        };
-
-        (fut, interrupt)
-    }
-
-    /// Start listening to the server side resonses, stops latest after the passed in `timeout`.
-    /// Must be called after [Handle::init].
-    pub fn wait_with_timeout(
-        &mut self,
-        dur: Duration,
-    ) -> (
-        impl Future<Output = Result<IdleResponse>> + '_,
-        stop_token::StopSource,
-    ) {
-        assert!(
-            self.id.is_some(),
-            "Cannot listen to response without starting IDLE"
-        );
-
-        let (waiter, interrupt) = self.wait();
-        let fut = async move {
-            match timeout(dur, waiter).await {
-                Ok(res) => res,
-                Err(_err) => Ok(IdleResponse::Timeout),
             }
         };
 
