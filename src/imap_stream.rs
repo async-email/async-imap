@@ -67,9 +67,7 @@ impl<R: Read + Write + Unpin> ImapStream<R> {
     pub fn as_mut(&mut self) -> &mut R {
         &mut self.inner
     }
-}
 
-impl<R: Read + Write + Unpin> ImapStream<R> {
     /// Attempts to decode a single response from the buffer.
     ///
     /// Returns `None` if the buffer does not contain enough data.
