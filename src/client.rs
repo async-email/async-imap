@@ -11,7 +11,7 @@ use base64::Engine as _;
 use extensions::id::{format_identification, parse_id};
 use extensions::quota::parse_get_quota_root;
 use futures::{io, Stream, StreamExt};
-use imap_proto::{RequestId, Response};
+use imap_proto::{Metadata, RequestId, Response};
 #[cfg(feature = "runtime-tokio")]
 use tokio::io::{AsyncRead as Read, AsyncWrite as Write, AsyncWriteExt};
 
@@ -1250,6 +1250,36 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Session<T> {
         Ok(c)
     }
 
+    /// The [`GETMETADATA` command](https://datatracker.ietf.org/doc/html/rfc5464.html#section-4.2)
+    pub async fn get_metadata(
+        &mut self,
+        mailbox_name: &str,
+        options: &str,
+        entry_specifier: &str,
+    ) -> Result<Vec<Metadata>> {
+        let options = if options.is_empty() {
+            String::new()
+        } else {
+            format!(" {options}")
+        };
+        let id = self
+            .run_command(format!(
+                "GETMETADATA {} {}{}",
+                quote!(mailbox_name),
+                options,
+                entry_specifier
+            ))
+            .await?;
+        let metadata = parse_metadata(
+            &mut self.conn.stream,
+            mailbox_name,
+            self.unsolicited_responses_tx.clone(),
+            id,
+        )
+        .await?;
+        Ok(metadata)
+    }
+
     /// The [`ID` command](https://datatracker.ietf.org/doc/html/rfc2971)
     ///
     /// `identification` is an iterable sequence of pairs such as `("name", Some("MyMailClient"))`.
@@ -2313,6 +2343,103 @@ mod tests {
             );
             assert_eq!(status.uid_next, Some(44292));
             assert_eq!(status.exists, 231);
+        }
+    }
+
+    #[cfg_attr(feature = "runtime-tokio", tokio::test)]
+    #[cfg_attr(feature = "runtime-async-std", async_std::test)]
+    async fn get_metadata() {
+        {
+            let response = b"* METADATA \"INBOX\" (/private/comment \"My own comment\")\r\n\
+                A0001 OK GETMETADATA complete\r\n"
+                .to_vec();
+
+            let mock_stream = MockStream::new(response);
+            let mut session = mock_session!(mock_stream);
+            let metadata = session
+                .get_metadata("INBOX", "", "/private/comment")
+                .await
+                .unwrap();
+            assert_eq!(
+                session.stream.inner.written_buf,
+                b"A0001 GETMETADATA \"INBOX\" /private/comment\r\n".to_vec()
+            );
+            assert_eq!(metadata.len(), 1);
+            assert_eq!(metadata[0].entry, "/private/comment");
+            assert_eq!(metadata[0].value.as_ref().unwrap(), "My own comment");
+        }
+
+        {
+            let response = b"* METADATA \"INBOX\" (/shared/comment \"Shared comment\" /private/comment \"My own comment\")\r\n\
+                A0001 OK GETMETADATA complete\r\n"
+                .to_vec();
+
+            let mock_stream = MockStream::new(response);
+            let mut session = mock_session!(mock_stream);
+            let metadata = session
+                .get_metadata("INBOX", "", "(/shared/comment /private/comment)")
+                .await
+                .unwrap();
+            assert_eq!(
+                session.stream.inner.written_buf,
+                b"A0001 GETMETADATA \"INBOX\" (/shared/comment /private/comment)\r\n".to_vec()
+            );
+            assert_eq!(metadata.len(), 2);
+            assert_eq!(metadata[0].entry, "/shared/comment");
+            assert_eq!(metadata[0].value.as_ref().unwrap(), "Shared comment");
+            assert_eq!(metadata[1].entry, "/private/comment");
+            assert_eq!(metadata[1].value.as_ref().unwrap(), "My own comment");
+        }
+
+        {
+            let response = b"* METADATA \"\" (/shared/comment {15}\r\nChatmail server /shared/admin {28}\r\nmailto:root@nine.testrun.org)\r\n\
+                A0001 OK OK Getmetadata completed (0.001 + 0.000 secs).\r\n"
+                .to_vec();
+
+            let mock_stream = MockStream::new(response);
+            let mut session = mock_session!(mock_stream);
+            let metadata = session
+                .get_metadata("", "", "(/shared/comment /shared/admin)")
+                .await
+                .unwrap();
+            assert_eq!(
+                session.stream.inner.written_buf,
+                b"A0001 GETMETADATA \"\" (/shared/comment /shared/admin)\r\n".to_vec()
+            );
+            assert_eq!(metadata.len(), 2);
+            assert_eq!(metadata[0].entry, "/shared/comment");
+            assert_eq!(metadata[0].value.as_ref().unwrap(), "Chatmail server");
+            assert_eq!(metadata[1].entry, "/shared/admin");
+            assert_eq!(
+                metadata[1].value.as_ref().unwrap(),
+                "mailto:root@nine.testrun.org"
+            );
+        }
+
+        {
+            let response = b"* METADATA \"\" (/shared/comment \"Chatmail server\")\r\n\
+                * METADATA \"\" (/shared/admin \"mailto:root@nine.testrun.org\")\r\n\
+                A0001 OK OK Getmetadata completed (0.001 + 0.000 secs).\r\n"
+                .to_vec();
+
+            let mock_stream = MockStream::new(response);
+            let mut session = mock_session!(mock_stream);
+            let metadata = session
+                .get_metadata("", "", "(/shared/comment /shared/admin)")
+                .await
+                .unwrap();
+            assert_eq!(
+                session.stream.inner.written_buf,
+                b"A0001 GETMETADATA \"\" (/shared/comment /shared/admin)\r\n".to_vec()
+            );
+            assert_eq!(metadata.len(), 2);
+            assert_eq!(metadata[0].entry, "/shared/comment");
+            assert_eq!(metadata[0].value.as_ref().unwrap(), "Chatmail server");
+            assert_eq!(metadata[1].entry, "/shared/admin");
+            assert_eq!(
+                metadata[1].value.as_ref().unwrap(),
+                "mailto:root@nine.testrun.org"
+            );
         }
     }
 }

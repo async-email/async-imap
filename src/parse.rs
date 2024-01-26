@@ -4,7 +4,7 @@ use async_channel as channel;
 use futures::io;
 use futures::prelude::*;
 use futures::stream::Stream;
-use imap_proto::{self, MailboxDatum, RequestId, Response};
+use imap_proto::{self, MailboxDatum, Metadata, RequestId, Response};
 
 use crate::error::{Error, Result};
 use crate::types::ResponseData;
@@ -392,6 +392,40 @@ pub(crate) async fn parse_ids<T: Stream<Item = io::Result<ResponseData>> + Unpin
     }
 
     Ok(ids)
+}
+
+/// Parses [GETMETADATA](https://www.rfc-editor.org/info/rfc5464) response.
+pub(crate) async fn parse_metadata<T: Stream<Item = io::Result<ResponseData>> + Unpin>(
+    stream: &mut T,
+    mailbox_name: &str,
+    unsolicited: channel::Sender<UnsolicitedResponse>,
+    command_tag: RequestId,
+) -> Result<Vec<Metadata>> {
+    let mut res_values = Vec::new();
+    while let Some(resp) = stream
+        .take_while(|res| filter(res, &command_tag))
+        .next()
+        .await
+    {
+        let resp = resp?;
+        match resp.parsed() {
+            // METADATA Response with Values
+            // <https://datatracker.ietf.org/doc/html/rfc5464.html#section-4.4.1>
+            Response::MailboxData(MailboxDatum::MetadataSolicited { mailbox, values })
+                if mailbox == mailbox_name =>
+            {
+                res_values.extend_from_slice(values.as_slice());
+            }
+
+            // We are not interested in
+            // [Unsolicited METADATA Response without Values](https://datatracker.ietf.org/doc/html/rfc5464.html#section-4.4.2),
+            // they go to unsolicited channel with other unsolicited responses.
+            _ => {
+                handle_unilateral(resp, unsolicited.clone()).await;
+            }
+        }
+    }
+    Ok(res_values)
 }
 
 // check if this is simply a unilateral server response
