@@ -2441,5 +2441,27 @@ mod tests {
                 "mailto:root@nine.testrun.org"
             );
         }
+
+        {
+            let response = b"* METADATA \"\" (/shared/comment NIL /shared/admin NIL)\r\n\
+                A0001 OK OK Getmetadata completed (0.001 + 0.000 secs).\r\n"
+                .to_vec();
+
+            let mock_stream = MockStream::new(response);
+            let mut session = mock_session!(mock_stream);
+            let metadata = session
+                .get_metadata("", "", "(/shared/comment /shared/admin)")
+                .await
+                .unwrap();
+            assert_eq!(
+                session.stream.inner.written_buf,
+                b"A0001 GETMETADATA \"\" (/shared/comment /shared/admin)\r\n".to_vec()
+            );
+            assert_eq!(metadata.len(), 2);
+            assert_eq!(metadata[0].entry, "/shared/comment");
+            assert_eq!(metadata[0].value, None);
+            assert_eq!(metadata[1].entry, "/shared/admin");
+            assert_eq!(metadata[1].value, None);
+        }
     }
 }
